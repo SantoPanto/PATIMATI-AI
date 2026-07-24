@@ -36,6 +36,8 @@ def test_species_mismatch_returns_zero():
     result = compute_final_score(emb, emb, ["cat"], ["dog"], 0.0, "cat", "dog")
     assert result["score"] == 0.0
     assert result["blocked_reason"] == "species_mismatch"
+    # cevap şekli normal yolla AYNI olmalı — eksik "match" anahtarı gerçek bug'dı (demo'da bulundu)
+    assert result["match"] is False
 
 
 def test_perfect_match():

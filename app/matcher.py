@@ -47,7 +47,7 @@ def compute_final_score(
     if (species_a != "unknown" and species_b != "unknown"
             and species_a != species_b):
         return {"score": 0.0, "visual": 0.0, "label": 0.0, "location": 0.0,
-                "blocked_reason": "species_mismatch"}
+                "match": False, "blocked_reason": "species_mismatch"}
 
     visual = cosine_similarity(embedding_a, embedding_b)
     label = jaccard_score(labels_a, labels_b)
