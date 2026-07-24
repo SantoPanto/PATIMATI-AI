@@ -54,10 +54,16 @@ async def analyze(file: UploadFile = File(...)):
 
     try:
         embedding = embedder.embed_bytes(img_bytes)
+    except Exception as e:
+        logger.error(f"Embedding hatası: {e}")
+        raise HTTPException(500, "Analiz sırasında hata oluştu.")
+
+    # Vision hatası analizi engellemez: embedding döner, etiketler boş kalır
+    try:
         vision = vision_analyzer.analyze(img_bytes)
     except Exception as e:
-        logger.error(f"Analiz hatası: {e}")
-        raise HTTPException(500, "Analiz sırasında hata oluştu.")
+        logger.error(f"Vision API hatası (etiketsiz devam ediliyor): {e}")
+        vision = {"labels": [], "species": "unknown", "colors": []}
 
     return AnalyzeResponse(
         embedding=embedding,
