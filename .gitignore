@@ -14,6 +14,8 @@ data/raw/
 data/train/
 data/val/
 data/test/
+data/oxford_pets/
+data/test_photos/
 
 # Keep folder placeholders so the directory structure ships with the repo.
 !data/raw/.gitkeep
