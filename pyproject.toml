@@ -1,0 +1,53 @@
+[project]
+name = "pet-ai"
+version = "0.1.0"
+description = "Kayıp/bulunan kedi ve köpek fotoğraflarını MegaDescriptor embedding'leri ile eşleştiren servis."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "torch==2.13.0",
+    "torchvision==0.28.0",
+    "timm==1.0.28",
+    "wildlife-tools==1.0.3",
+    "Pillow==12.3.0",
+    "numpy==2.4.6",
+    "pandas==3.0.5",
+    "scikit-learn==1.9.0",
+    "matplotlib==3.11.1",
+    "tqdm==4.69.0",
+    "fastapi==0.139.2",
+    "uvicorn==0.51.0",
+    "python-multipart==0.0.32",
+    "pydantic==2.13.4",
+    "python-dotenv==1.2.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.28",
+    "ruff>=0.8",
+    "mypy>=1.13",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# FastAPI'nin Depends()/File()/Query()/Form() varsayılan argüman deseni B008'i tetikler; bu kütüphanenin kendi idiomu.
+"app/api.py" = ["B008"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+exclude = ["^\\.venv/"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

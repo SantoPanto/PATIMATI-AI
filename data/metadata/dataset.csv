@@ -1,0 +1,11 @@
+image_path,animal_id,split,species
+data/train/bo_dog/foto4.jpg,bo_dog,train,
+data/train/bo_dog/foto2.jpg,bo_dog,train,
+data/val/bo_dog/foto3.jpg,bo_dog,val,
+data/test/bo_dog/foto5.jpg,bo_dog,test,
+data/test/bo_dog/foto1.jpg,bo_dog,test,
+data/train/grumpy_cat/foto4.jpg,grumpy_cat,train,
+data/train/grumpy_cat/foto3.jpg,grumpy_cat,train,
+data/val/grumpy_cat/foto1.jpg,grumpy_cat,val,
+data/test/grumpy_cat/foto5.jpg,grumpy_cat,test,
+data/test/grumpy_cat/foto2.jpg,grumpy_cat,test,
