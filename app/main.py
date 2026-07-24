@@ -9,10 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 
+from .attributes import attribute_analyzer
 from .embedder import embedder
 from .matcher import compute_final_score
 from .models import AnalyzeResponse, MatchRequest
-from .vision import vision_analyzer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -58,11 +58,11 @@ async def analyze(file: UploadFile = File(...)):
         logger.error(f"Embedding hatası: {e}")
         raise HTTPException(500, "Analiz sırasında hata oluştu.")
 
-    # Vision hatası analizi engellemez: embedding döner, etiketler boş kalır
+    # Öznitelik hatası analizi engellemez: embedding döner, etiketler boş kalır
     try:
-        vision = vision_analyzer.analyze(img_bytes)
+        vision = attribute_analyzer.analyze(img_bytes, embedding)
     except Exception as e:
-        logger.error(f"Vision API hatası (etiketsiz devam ediliyor): {e}")
+        logger.error(f"Öznitelik çıkarma hatası (etiketsiz devam ediliyor): {e}")
         vision = {"labels": [], "species": "unknown", "colors": []}
 
     return AnalyzeResponse(

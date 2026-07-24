@@ -36,6 +36,15 @@ class PetEmbedder:
         img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         return self._embed_pil(img)
 
+    def embed_text(self, texts: list[str]) -> torch.Tensor:
+        """Metin listesini L2-normalize CLIP embedding matrisine dönüştürür (zero-shot için)."""
+        inputs = self.processor(text=texts, return_tensors="pt", padding=True)
+        with torch.no_grad():
+            feats = self.model.get_text_features(**inputs)
+        if not isinstance(feats, torch.Tensor):
+            feats = feats.pooler_output
+        return feats / feats.norm(dim=-1, keepdim=True)
+
     def _embed_pil(self, img: Image.Image) -> list[float]:
         inputs = self.processor(images=img, return_tensors="pt")
         with torch.no_grad():
