@@ -1,0 +1,19 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Gizli bilgiler — ASLA commit'lenmez
+.env
+google_key.json
+
+# Test verisi ve model önbelleği (herkes script'le kendi üretir)
+tests/data/
+tests/seed_data/
+tmp/
+.cache/
+
+# IDE
+.vscode/
+.idea/
