@@ -42,6 +42,16 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 # Swagger UI: http://localhost:8000/docs
 ```
 
+## Docker
+
+```bash
+docker build -t patimati-ai .
+docker run -p 8000:8000 patimati-ai
+```
+
+Model imajın içine build sırasında gömülür (~600 MB); container ağ erişimi olmadan
+da çalışır. Railway'de `PORT` ortam değişkeni otomatik kullanılır.
+
 ## Test
 
 ```bash

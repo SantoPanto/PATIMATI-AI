@@ -1,0 +1,13 @@
+# Build context'i küçük tut ve GİZLİLERİ imaja sokma
+venv/
+tmp/
+tests/
+scripts/
+.git/
+.pytest_cache/
+__pycache__/
+*.pyc
+
+# Gizli bilgiler — imaja ASLA girmez
+.env
+google_key.json
