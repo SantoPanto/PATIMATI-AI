@@ -1,5 +1,11 @@
 # app/matcher.py
+import os
+
 import numpy as np
+
+# Bildirim eşiği — ortam değişkeninden ayarlanabilir (varsayılan 0.70,
+# 111 fotoğrafla ölçülerek doğrulandı; bkz. scripts/measure_threshold.py)
+MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.70"))
 
 
 def cosine_similarity(a: list, b: list) -> float:
@@ -61,5 +67,5 @@ def compute_final_score(
         "visual": round(visual, 4),
         "label": round(label, 4),
         "location": round(location, 4),
-        "match": score >= 0.70,  # Bildirim eşiği
+        "match": score >= MATCH_THRESHOLD,
     }

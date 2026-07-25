@@ -10,9 +10,13 @@ Aşama A yaklaşımı: model eğitimi YOK — önceden eğitilmiş modellerle ö
 | Bileşen | Görev |
 |---|---|
 | CLIP ViT-B/32 | Fotoğraftan 512 boyutlu embedding (görsel parmak izi) |
-| Google Vision API | Etiket + tür tespiti (cat/dog) + dominant renk |
-| Hibrit skor | %55 görsel + %30 etiket + %15 konum → eşik 0.70 |
+| CLIP zero-shot + piksel analizi | Tür (cat/dog) + desen + dominant renk etiketleri — tamamen lokal, dış API'siz |
+| Hibrit skor | %55 görsel + %30 etiket + %15 konum → eşik 0.70 (`MATCH_THRESHOLD` ile ayarlanabilir) |
 | FastAPI | `/health`, `/analyze`, `/match` endpoint'leri (port 8000) |
+
+Not: Plandaki Google Vision API, faturalandırma şartı nedeniyle CLIP zero-shot ile
+değiştirildi (PR #1 yorumlarında gerekçe ve ölçümler). `app/vision.py` dönüş yolu
+olarak duruyor; `google_key.json` + faturalandırmalı proje varsa tekrar bağlanabilir.
 
 Spring Boot backend bu servise HTTP ile bağlanır (bkz. teknik rapor bölüm 10).
 
@@ -31,9 +35,9 @@ pip install -r requirements.txt
 copy .env.example .env         # sonra .env içini doldur
 ```
 
-Google Vision API anahtarı için: Google Cloud Console → Cloud Vision API etkinleştir
-→ Service Account oluştur → JSON anahtarı `google_key.json` olarak proje köküne koy.
-(`google_key.json` ve `.env` .gitignore'dadır, asla commit'lenmez.)
+Etiket çıkarımı lokal çalıştığı için hiçbir API anahtarı GEREKMEZ.
+(Opsiyonel: Vision API'ye dönülecekse `google_key.json` proje köküne konur —
+`google_key.json` ve `.env` .gitignore'dadır, asla commit'lenmez.)
 
 ## Çalıştırma
 
@@ -64,8 +68,9 @@ pytest tests/
 ```
 app/
 ├── main.py            # FastAPI giriş noktası
-├── embedder.py        # CLIP feature extraction
-├── vision.py          # Google Vision API
+├── embedder.py        # CLIP feature extraction (görüntü + metin)
+├── attributes.py      # Zero-shot tür/desen + piksel renk analizi (etiket kaynağı)
+├── vision.py          # (opsiyonel/yedek) Google Vision — şu an kullanılmıyor
 ├── matcher.py         # Hibrit skor hesaplama
 └── models.py          # Pydantic şemaları
 tests/                 # Birim testler + seed_data/
