@@ -1,6 +1,9 @@
 # scripts/prepare_seed.py
 # Oxford-IIIT Pet Dataset'ten seed data üretir: 37 sınıf x 3 fotoğraf.
+# Ayrıca siniflar.json yazar (class_NN -> ırk adı + tür) — cins doğruluk ölçümü
+# bunu kullanır, bkz. scripts/measure_breed.py
 # Çalıştır: python scripts/prepare_seed.py
+import json
 from pathlib import Path
 
 from torchvision import transforms
@@ -30,4 +33,24 @@ for label, imgs in by_class.items():
     for i, img in enumerate(imgs):
         img.save(label_dir / f"{i}.jpg")
 
-print(f"Seed data hazır: {out_dir} ({len(by_class)} sınıf)")
+# --- Irk adı + tür eşlemesi -------------------------------------------------
+# Tür bilgisi ham annotation dosyasından okunur: <dosya> <CLASS-ID> <SPECIES 1=Cat 2=Dog> <BREED-ID>
+list_txt = Path("./tmp/oxford-iiit-pet/annotations/list.txt")
+tur_by_class = {}
+for satir in list_txt.read_text(encoding="utf-8").splitlines():
+    if satir.startswith("#") or not satir.strip():
+        continue
+    _ad, class_id, species_id, _breed_id = satir.split()
+    tur_by_class.setdefault(int(class_id) - 1, "cat" if species_id == "1" else "dog")
+
+siniflar = {
+    f"class_{label:02d}": {"breed": dataset.classes[label], "species": tur_by_class[label]}
+    for label in sorted(by_class)
+}
+(out_dir / "siniflar.json").write_text(
+    json.dumps(siniflar, ensure_ascii=False, indent=2), encoding="utf-8")
+
+kedi = sum(1 for v in siniflar.values() if v["species"] == "cat")
+print(f"Seed data hazır: {out_dir} ({len(by_class)} sınıf — {kedi} kedi, "
+      f"{len(siniflar) - kedi} köpek)")
+print(f"Irk eşlemesi yazıldı: {out_dir / 'siniflar.json'}")
