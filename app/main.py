@@ -156,7 +156,7 @@ async def match(req: MatchRequest):
     """
     try:
         matches, atlanan = adaylari_eslestir(
-            embedding=req.embedding, labels=req.labels, species=req.species,
+            embeddings=req.embeddings, labels=req.labels, species=req.species,
             candidates=req.candidates, ad_id=req.ad_id,
         )
     except Exception as e:  # sorgu vektörünün kendisi bozuksa

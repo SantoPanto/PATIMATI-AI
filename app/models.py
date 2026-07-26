@@ -18,7 +18,10 @@ class AnalyzeResponse(BaseModel):
 
 class MatchCandidate(BaseModel):
     ad_id: int
-    embedding: list[float]
+    # İlanın HER fotoğrafı için bir vektör. Tek fotoğrafla eşleşme oranı gerçek
+    # veride %24'te kaldığı için çoklu fotoğraf zorunlu hale geldi — görsel skor
+    # en iyi fotoğraf çiftinden alınır (bkz. docs/olcum-raporu.md).
+    embeddings: list[list[float]] = Field(min_length=1)
     labels: list[str] = Field(default_factory=list)
     species: str = "unknown"
     distance_km: float = 0.0
@@ -29,7 +32,7 @@ class MatchCandidate(BaseModel):
 
 
 class MatchRequest(BaseModel):
-    embedding: list[float]
+    embeddings: list[list[float]] = Field(min_length=1)
     labels: list[str] = Field(default_factory=list)
     species: str = "unknown"
     candidates: list[MatchCandidate] = Field(default_factory=list)
@@ -45,3 +48,5 @@ class MatchResult(BaseModel):
     label: float
     location: float
     match: bool
+    photo_a: int | None = None   # eşleşen fotoğraf çiftinin indeksleri
+    photo_b: int | None = None

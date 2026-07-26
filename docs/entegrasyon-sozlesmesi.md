@@ -72,7 +72,10 @@ Java → Python.
   "candidates": [
     {
       "ad_id": 98,
-      "embedding": [0.0123, -0.0456, "... 512 adet float ..."],
+      "embeddings": [
+        [0.0123, -0.0456, "... 512 adet float ..."],
+        [0.0311, -0.0122, "... ilanın ikinci fotoğrafı ..."]
+      ],
       "labels": ["cat", "tabby", "brown", "white"],
       "species": "cat",
       "distance_km": 1.2,
@@ -97,7 +100,7 @@ Java → Python.
 | Alan | Tip | Kaynak |
 |---|---|---|
 | `ad_id` | long | aday ilanın kimliği |
-| `embedding` | float[512] | adayın `ai_embedding` sütunu |
+| `embeddings` | float[512][] | ⚠️ **Liste — ilanın her fotoğrafı için bir vektör.** Görsel skor tüm fotoğraf çiftlerinin **en iyisinden** alınır. Tek fotoğrafla eşleşme oranı gerçek veride %24'te kaldığı için çoklu fotoğraf zorunludur (bkz. `docs/olcum-raporu.md` §4). En az 1, en fazla 5. |
 | `labels` | string[] | adayın `ai_labels` sütunu |
 | `species` | string | adayın `ai_species` sütunu |
 | `distance_km` | double | PostGIS ile hesaplanan gerçek mesafe |
@@ -125,7 +128,10 @@ Python → Java.
   "status": "ok",
   "model_version": "clip-vit-base-patch32/v1",
   "analysis": {
-    "embedding": [0.0123, -0.0456, "... 512 adet float ..."],
+    "embeddings": [
+      [0.0123, -0.0456, "... ilk fotoğrafın 512 float'ı ..."],
+      [0.0311, -0.0122, "... ikinci fotoğrafın ..."]
+    ],
     "species": "cat",
     "species_confidence": 0.99,
     "is_pet": true,
@@ -142,7 +148,9 @@ Python → Java.
       "visual": 0.79,
       "label": 0.66,
       "location": 0.80,
-      "match": true
+      "match": true,
+      "photo_a": 0,
+      "photo_b": 2
     }
   ],
   "skipped_candidates": {
@@ -160,7 +168,8 @@ Python → Java.
 | Alan | Açıklama |
 |---|---|
 | `model_version` | **Kritik.** Hangi model/ön işleme ile üretildiğini söyler. Java bunu `ai_model_version` sütununa yazar. Model değişirse eski vektörler kıyaslanamaz hâle gelir; bu alan olmadan hangilerinin bayat olduğu anlaşılamaz. |
-| `analysis.embedding` | 512 boyutlu, L2-normalize. `ai_embedding` sütununa yazılır. |
+| `analysis.embeddings` | Her fotoğraf için 512 boyutlu, L2-normalize vektör. `ai_embeddings` sütununa yazılır. Sırası `photo_urls` ile aynıdır. |
+| `matches[].photo_a` / `photo_b` | Hangi fotoğraf çiftinin eşleştiği (0 tabanlı indeks). Arayüzde "bu iki fotoğraf benziyor" diye gösterilebilir; hata ayıklamada hangi karenin tuttuğunu söyler. Tür uyuşmazlığında `null`. |
 | `analysis.species` | `cat` \| `dog` \| `unknown`. Güveni düşükse `unknown` döner. |
 | `analysis.is_pet` | `false` → fotoğrafta kedi/köpek görünmüyor (ekran görüntüsü, insan, nesne...). Arayüz kullanıcıdan başka bir fotoğraf isteyebilir. Ölçüm: 111 gerçek hayvan fotoğrafında **0 yanlış reddetme**; gerçek "hayvan olmayan fotoğraf" test kümesi henüz olmadığı için yakalama oranı ölçülmedi, bu yüzden kapı temkinli ayarlandı. |
 | `analysis.breed` | Bilgi amaçlı. **Filtre olarak kullanılmaz** (bkz. §7). `is_pet` false ise her zaman `null`. |
@@ -229,9 +238,14 @@ ilan CRUD'una karışmaz.
 ```java
 // entity/Ad.java — eklenecek alanlar
 
+// İlanın HER fotoğrafı için bir vektör. Tek fotoğrafla eşleşme oranı gerçek
+// veride %24'te kaldığı için çoklu fotoğraf zorunlu (docs/olcum-raporu.md §4).
+// Kendi kayıt tipiyle saklamak, fotoğraf sırası değişse bile eşlemeyi korur.
 @JdbcTypeCode(SqlTypes.JSON)
-@Column(name = "ai_embedding", columnDefinition = "jsonb")
-private float[] aiEmbedding;          // 512 boyutlu CLIP vektörü
+@Column(name = "ai_embeddings", columnDefinition = "jsonb")
+private List<AiFotoVektoru> aiEmbeddings;
+
+public record AiFotoVektoru(String photoUrl, float[] embedding) {}
 
 @JdbcTypeCode(SqlTypes.JSON)
 @Column(name = "ai_labels", columnDefinition = "jsonb")
@@ -283,6 +297,15 @@ yazmaya gerek yok.
 3. **AI kesin eşleşme üretmez, sıralı aday listesi üretir.** Son onay her
    zaman kullanıcıdadır. Arayüz "eşleşti" değil "olası eşleşme" dilini
    kullanmalıdır.
+   *Bu bir tercih değil, ölçüm sonucudur:* gerçek fotoğraflarda "aynı hayvan"
+   ve "farklı hayvan" skor dağılımları çakışıyor — hiçbir eşik ikisini temiz
+   ayırmıyor (`docs/olcum-raporu.md` §4). `match: true` "kesin aynı hayvan"
+   değil, **"bildirim gönderilecek kadar eminiz"** demektir. Daha düşük skorlu
+   adaylar da listede gösterilmeli, sadece bildirim tetiklememelidir.
+5. **İlan başına birden çok fotoğraf istenmelidir.** Tek fotoğrafla gerçek
+   eşleşmelerin yalnızca %24'ü yakalanıyor; üç fotoğrafla eşik aşılıyor.
+   Arayüz kullanıcıyı birden fazla fotoğraf yüklemeye teşvik etmelidir —
+   bu, eşleştirme başarısını en çok artıran tek şey.
 4. **Bildirim tekrarı önlenmelidir.** KISIM 3 zaten yeni ilanda 5 km'deki
    herkese bildirim atıyor. Eşleşme bildirimi ayrı bir olaydır ve yalnızca
    eşleşen ilanların sahiplerine gitmelidir.
@@ -346,7 +369,9 @@ yazmaya gerek yok.
 |---|---|
 | Python AI — analiz (`/analyze`) | ✅ Çalışıyor (HTTP) |
 | Python AI — eşleştirme (`/match`) | ✅ Çalışıyor (HTTP), alan adları sözleşmeyle hizalandı (`ad_id`, `model_version`) |
-| Python AI — uç durum sağlamlaştırması | ✅ Negatif mesafe, NaN/bozuk vektör, kendisiyle eşleşme, tekrar eden aday, aday sınırı, çok küçük/bozuk görüntü, EXIF döndürme, şeffaf PNG, "hayvan mı" kapısı — 21 gerileme testi |
+| Python AI — uç durum sağlamlaştırması | ✅ Negatif mesafe, NaN/bozuk vektör, kendisiyle eşleşme, tekrar eden aday, aday sınırı, çok küçük/bozuk görüntü, EXIF döndürme, şeffaf PNG, "hayvan mı" kapısı — 24 gerileme testi |
+| Python AI — çoklu fotoğraf eşleştirme | ✅ Görsel skor en iyi fotoğraf çiftinden; gerçek veriyle doğrulandı (`docs/olcum-raporu.md`) |
+| Python AI — gerçek veriyle ölçüm | ✅ Eşik ve hayvan kapısı gerçek fotoğraflarla sınandı; bulgular tasarıma işlendi |
 | Python AI — cins (`breed`) | ✅ Yapıldı — 37 ırk zero-shot; top-1 %78, güven eşiği 0.70 üstünde %90 (ölçüm: `scripts/measure_breed.py`) |
 | Python AI — URL'den indirme | ⬜ Yapılacak |
 | Python AI — RabbitMQ tüketici/üretici | ⬜ Yapılacak |

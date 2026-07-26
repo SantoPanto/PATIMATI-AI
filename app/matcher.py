@@ -48,6 +48,37 @@ def cosine_similarity(a: list, b: list) -> float:
     return float(np.clip(float(np.dot(va, vb)) / norm, -1.0, 1.0))
 
 
+def _vektor_listesi(x) -> list:
+    """Tek vektörü de vektör listesini de kabul eder; her zaman liste döner.
+
+    İlan başına birden çok fotoğraf olabildiği için eşleştirme liste üzerinden
+    çalışır. /compare gibi tek fotoğraflı yollar tek vektör göndermeye devam
+    edebilsin diye bu esneklik var; tel üzerindeki biçimi Pydantic zorluyor.
+    """
+    if not x:
+        return []
+    return [x] if isinstance(x[0], (int, float)) else list(x)
+
+
+def en_iyi_gorsel(a_listesi: list, b_listesi: list) -> tuple:
+    """İki ilanın TÜM fotoğraf çiftleri arasındaki en yüksek benzerliği bulur.
+
+    Neden en iyi çift: gerçek veriyle ölçüldü — aynı kedinin iki ayrı
+    fotoğrafında eşleşme oranı %24'te kalıyordu (dağılımlar çakışıyor).
+    İlan başına 3 fotoğraf koyup en iyi çifti almak skoru 0.647'den 0.748'e
+    çıkardı ve yanlış alarm üretmedi. Tek fotoğrafla bu iş yürümüyor.
+
+    Dönüş: (en_yuksek_benzerlik, a_foto_indeksi, b_foto_indeksi)
+    """
+    en_iyi, ia, ib = -1.0, -1, -1
+    for i, va in enumerate(a_listesi):
+        for j, vb in enumerate(b_listesi):
+            s = cosine_similarity(va, vb)
+            if s > en_iyi:
+                en_iyi, ia, ib = s, i, j
+    return en_iyi, ia, ib
+
+
 def jaccard_score(labels_a: list, labels_b: list) -> float:
     """İki etiket kümesinin Jaccard benzerliği."""
     if not labels_a or not labels_b:
@@ -73,8 +104,8 @@ def location_score(distance_km: float) -> float:
 
 
 def compute_final_score(
-    embedding_a: list,
-    embedding_b: list,
+    embeddings_a,
+    embeddings_b,
     labels_a: list,
     labels_b: list,
     distance_km: float,
@@ -82,16 +113,24 @@ def compute_final_score(
     species_b: str = "unknown",
 ) -> dict:
     """
-    Hibrit eşleşme skoru hesaplar.
+    Hibrit eşleşme skoru hesaplar. Her iki taraf da birden çok fotoğraf
+    taşıyabilir; görsel benzerlik en iyi fotoğraf çiftinden alınır.
     Farklı türler (kedi vs köpek) için skor otomatik sıfırlanır.
     """
-    # Tür uyumsuzluğu — erken çıkış
+    # Tür uyumsuzluğu — erken çıkış.
+    # Cevap şekli normal yolla BİREBİR aynı olmalı: eksik anahtar Spring
+    # tarafındaki DTO'yu kırıyordu (demo sırasında bulunan gerçek bir hataydı).
     if (species_a != "unknown" and species_b != "unknown"
             and species_a != species_b):
         return {"score": 0.0, "visual": 0.0, "label": 0.0, "location": 0.0,
-                "match": False, "blocked_reason": "species_mismatch"}
+                "match": False, "photo_a": None, "photo_b": None,
+                "blocked_reason": "species_mismatch"}
 
-    visual = cosine_similarity(embedding_a, embedding_b)
+    a_listesi, b_listesi = _vektor_listesi(embeddings_a), _vektor_listesi(embeddings_b)
+    if not a_listesi or not b_listesi:
+        raise GecersizEmbedding("her iki tarafta da en az bir fotoğraf olmalı")
+
+    visual, foto_a, foto_b = en_iyi_gorsel(a_listesi, b_listesi)
     label = jaccard_score(labels_a, labels_b)
     location = location_score(distance_km)
 
@@ -106,10 +145,14 @@ def compute_final_score(
         "label": round(label, 4),
         "location": round(location, 4),
         "match": score >= MATCH_THRESHOLD,
+        # Hangi fotoğraf çifti eşleşti — arayüzde "bu ikisi benziyor" diye
+        # gösterilebilir, hata ayıklarken de hangi karenin tuttuğunu söyler.
+        "photo_a": foto_a,
+        "photo_b": foto_b,
     }
 
 
-def adaylari_eslestir(embedding, labels, species, candidates,
+def adaylari_eslestir(embeddings, labels, species, candidates,
                       ad_id=None, model_version=MODEL_SURUMU):
     """Adayları skorlar, sıralar; eleyip atladıklarını sayarak raporlar.
 
@@ -150,7 +193,7 @@ def adaylari_eslestir(embedding, labels, species, candidates,
 
         try:
             sonuc = compute_final_score(
-                embedding_a=embedding, embedding_b=aday.embedding,
+                embeddings_a=embeddings, embeddings_b=aday.embeddings,
                 labels_a=labels, labels_b=aday.labels,
                 distance_km=aday.distance_km,
                 species_a=species, species_b=aday.species,

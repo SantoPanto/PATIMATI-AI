@@ -42,14 +42,16 @@ for i, p in enumerate([aday1, aday2], 1):
     print(f"Aday {i}: {p}")
     print(f"  → {ozet(c)}")
     adlar[i] = f"aday-{i}"
-    adaylar.append({"ad_id": i, "embedding": c["embedding"], "labels": c["labels"],
+    # embeddings LİSTE: bir ilanın birden çok fotoğrafı olabilir, görsel skor
+    # en iyi fotoğraf çiftinden alınır. Burada her ilanın tek fotoğrafı var.
+    adaylar.append({"ad_id": i, "embeddings": [c["embedding"]], "labels": c["labels"],
                     "species": c["species"], "distance_km": 2.0,
                     # Sürüm gönderilmezse aday atlanır — kasıtlı katı davranış,
                     # eski vektörlerle sessizce kıyaslama yapılmasın diye.
                     "model_version": c["model_version"]})
 
 r = httpx.post(f"{BASE}/match",
-               json={"ad_id": 999, "embedding": a["embedding"], "labels": a["labels"],
+               json={"ad_id": 999, "embeddings": [a["embedding"]], "labels": a["labels"],
                      "species": a["species"], "candidates": adaylar}, timeout=120)
 r.raise_for_status()
 cevap = r.json()

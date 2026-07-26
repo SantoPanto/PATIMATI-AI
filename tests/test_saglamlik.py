@@ -26,7 +26,7 @@ def vektor(seed=0):
 
 
 def aday(ad_id, seed=0, **kwargs):
-    varsayilan = {"ad_id": ad_id, "embedding": vektor(seed), "labels": ["cat"],
+    varsayilan = {"ad_id": ad_id, "embeddings": [vektor(seed)], "labels": ["cat"],
                   "species": "cat", "distance_km": 1.0, "model_version": MODEL_SURUMU}
     varsayilan.update(kwargs)
     return MatchCandidate(**varsayilan)
@@ -127,10 +127,41 @@ def test_surumsuz_aday_atlanir():
 
 def test_bozuk_aday_digerlerini_dusurmez():
     """Tek bozuk aday tüm isteği düşürmemeli, ama sessizce de yok sayılmamalı."""
-    bozuk = aday(1, embedding=[float("nan")] * VEKTOR_BOYUTU)
+    bozuk = aday(1, embeddings=[[float("nan")] * VEKTOR_BOYUTU])
     m, atlanan = adaylari_eslestir(vektor(), ["cat"], "cat", [bozuk, aday(2, seed=5)])
     assert len(m) == 1 and m[0]["ad_id"] == 2
     assert atlanan["gecersiz_embedding"] == 1
+
+
+# --------------------------------------------------------------------------
+# Çoklu fotoğraf
+# --------------------------------------------------------------------------
+
+def test_coklu_fotograf_en_iyi_cifti_secer():
+    """Görsel skor, iki ilanın tüm fotoğraf çiftleri arasındaki EN İYİsi olmalı.
+
+    Gerçek veriyle ölçüldü: tek fotoğrafla aynı hayvanın eşleşme oranı %24'te
+    kalıyordu, ilan başına 3 fotoğrafla en iyi çifti almak eşiğin üstüne çıkardı.
+    """
+    hedef = vektor(1)
+    # İkinci ilanda üç fotoğraf var ve sadece sonuncusu hedefle aynı
+    aday_cok = aday(1, embeddings=[vektor(2), vektor(3), hedef])
+    m, _ = adaylari_eslestir([hedef], ["cat"], "cat", [aday_cok])
+    assert m[0]["visual"] == pytest.approx(1.0, abs=1e-4)
+    assert m[0]["photo_b"] == 2, "en iyi çift 3. fotoğraf olmalıydı"
+
+
+def test_coklu_fotograf_tekli_kadar_iyi_olmali():
+    """Fotoğraf eklemek skoru asla düşürmemeli (en iyi çift alındığı için)."""
+    a, b, c = vektor(1), vektor(2), vektor(3)
+    tek, _ = adaylari_eslestir([a], ["cat"], "cat", [aday(1, embeddings=[b])])
+    cok, _ = adaylari_eslestir([a], ["cat"], "cat", [aday(1, embeddings=[b, c])])
+    assert cok[0]["visual"] >= tek[0]["visual"]
+
+
+def test_bos_fotograf_listesi_reddedilir():
+    with pytest.raises(Exception):
+        MatchCandidate(ad_id=1, embeddings=[], model_version=MODEL_SURUMU)
 
 
 def test_aday_siniri_uygulanir():
