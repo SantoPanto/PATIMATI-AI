@@ -16,6 +16,15 @@ class AnalyzeResponse(BaseModel):
     model_version: str              # Hangi model/ön işlemeyle üretildi
 
 
+class AnalyzeUrlRequest(BaseModel):
+    """Kuyruk mesajının taşıdığı biçim: dosya değil adres.
+
+    Üretim akışında fotoğraflar S3'te durur ve mesajda yalnızca adresleri
+    taşınır — büyük dosyaları kuyruktan geçirmemek için.
+    """
+    photo_urls: list[str] = Field(min_length=1, max_length=5)
+
+
 class MatchCandidate(BaseModel):
     ad_id: int
     # İlanın HER fotoğrafı için bir vektör. Tek fotoğrafla eşleşme oranı gerçek

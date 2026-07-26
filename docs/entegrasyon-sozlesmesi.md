@@ -346,6 +346,14 @@ yazmaya gerek yok.
 - S3 fotoğrafları için **süreli özel adres (presigned URL)** önerilir; böylece
   AWS anahtarı AI servisine hiç girmez. Süre en az 10 dakika olmalı (kuyruk
   gecikmesi payı).
+- **Fotoğraf adresleri beyaz listeye alınmalıdır** (`PHOTO_ALLOWED_HOSTS`).
+  AI servisi kendisine verilen adresi indirdiği için, korunmazsa iç ağ
+  adreslerine istek attırılabilir (SSRF). Uygulanan korumalar:
+  yalnızca listedeki alan adları; yerel/özel ağ adresleri ancak listede
+  yazılıysa; bağlantı-yerel adresler (169.254.x — bulut kimlik bilgisi ucu)
+  **listede yazsa bile her koşulda reddedilir**; yönlendirme takip edilmez;
+  indirme sırasında boyut sınırı ve zaman aşımı uygulanır.
+  ⚠️ Backend hangi alan adından servis edeceğini bildirmeli ki listeye eklensin.
 - Kuyruk mesajlarında kişisel veri taşınmaz: ad, e-posta, telefon gönderilmez.
   Yalnızca ilan kimliği, fotoğraf adresi ve türetilmiş vektörler taşınır.
 
@@ -372,6 +380,8 @@ yazmaya gerek yok.
 | Python AI — uç durum sağlamlaştırması | ✅ Negatif mesafe, NaN/bozuk vektör, kendisiyle eşleşme, tekrar eden aday, aday sınırı, çok küçük/bozuk görüntü, EXIF döndürme, şeffaf PNG, "hayvan mı" kapısı — 24 gerileme testi |
 | Python AI — çoklu fotoğraf eşleştirme | ✅ Görsel skor en iyi fotoğraf çiftinden; gerçek veriyle doğrulandı (`docs/olcum-raporu.md`) |
 | Python AI — gerçek veriyle ölçüm | ✅ Eşik ve hayvan kapısı gerçek fotoğraflarla sınandı; bulgular tasarıma işlendi |
+| Python AI — URL'den indirme + çoklu fotoğraf | ✅ `POST /analyze_url` — kuyruk akışıyla aynı kodu çağırır, RabbitMQ olmadan da denenebilir |
+| Python AI — SSRF koruması | ✅ Beyaz liste, yerel ağ engeli, bağlantı-yerel mutlak yasak, yönlendirme yok, boyut/zaman sınırı |
 | Python AI — cins (`breed`) | ✅ Yapıldı — 37 ırk zero-shot; top-1 %78, güven eşiği 0.70 üstünde %90 (ölçüm: `scripts/measure_breed.py`) |
 | Python AI — URL'den indirme | ⬜ Yapılacak |
 | Python AI — RabbitMQ tüketici/üretici | ⬜ Yapılacak |

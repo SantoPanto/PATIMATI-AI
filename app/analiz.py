@@ -1,0 +1,86 @@
+# app/analiz.py
+"""Bir ilanın fotoğraflarını uçtan uca analiz eder.
+
+Sözleşmedeki `analysis` bloğunu üreten yer burası. HTTP uç noktası ve
+(gelecekte) kuyruk tüketicisi aynı fonksiyonu çağırır — iş mantığı tek yerde
+durur, sadece giriş kapısı değişir.
+"""
+import logging
+
+from .attributes import attribute_analyzer
+from .embedder import embedder
+from .hatalar import GecersizGoruntu
+from .indirici import hepsini_indir
+from .surum import MODEL_SURUMU
+
+logger = logging.getLogger(__name__)
+
+
+def baytlari_analiz_et(fotograflar: list[bytes],
+                       basarisizlar: list[dict] | None = None) -> dict:
+    """Fotoğraf baytlarından sözleşmedeki `analysis` bloğunu üretir.
+
+    Bozuk bir fotoğraf diğerlerini düşürmez; atlanır ve raporlanır. Hepsi
+    bozuksa hata fırlatılır — o zaman analiz edilecek bir şey kalmamıştır.
+    """
+    basarisizlar = list(basarisizlar or [])
+    embeddings, oznitelikler = [], []
+
+    for i, ham in enumerate(fotograflar):
+        try:
+            emb = embedder.embed_bytes(ham)
+        except GecersizGoruntu as e:
+            logger.warning("Fotoğraf %d atlandı: %s", i, e)
+            basarisizlar.append({"index": i, "error": str(e)})
+            continue
+        embeddings.append(emb)
+        try:
+            oznitelikler.append(attribute_analyzer.analyze(ham, emb))
+        except Exception as e:
+            # Öznitelik hatası embedding'i çöpe atmamalı: eşleştirme etiketsiz
+            # de çalışır, sadece skorun etiket bileşeni sıfırlanır.
+            logger.error("Öznitelik çıkarma hatası (etiketsiz devam): %s", e)
+            oznitelikler.append({"labels": [], "species": "unknown",
+                                 "species_confidence": 0.0, "is_pet": True,
+                                 "breed": None, "breed_confidence": 0.0,
+                                 "pattern": None, "colors": []})
+
+    if not embeddings:
+        raise GecersizGoruntu("Hiçbir fotoğraf işlenemedi")
+
+    birincil = _birincil_sec(oznitelikler)
+    return {
+        "embeddings": embeddings,
+        "species": birincil["species"],
+        "species_confidence": birincil["species_confidence"],
+        # İlanda tek bir hayvan fotoğrafı bile varsa hayvan var sayılır;
+        # kullanıcı 3 fotoğraf yüklerken birine yanlışlıkla manzara koyabilir.
+        "is_pet": any(o["is_pet"] for o in oznitelikler),
+        "breed": birincil["breed"],
+        "breed_confidence": birincil["breed_confidence"],
+        "pattern": birincil["pattern"],
+        "colors": birincil["colors"],
+        "labels": birincil["labels"],
+        "model_version": MODEL_SURUMU,
+        "photo_count": len(embeddings),
+        "failed_photos": basarisizlar,
+    }
+
+
+def _birincil_sec(oznitelikler: list[dict]) -> dict:
+    """Etiketleri hangi fotoğraftan alacağımızı seçer.
+
+    İlanın birden çok fotoğrafı var ama sözleşmede tek bir tür/cins/etiket
+    alanı dönüyor. En NET fotoğrafı seçiyoruz: hayvan görünen fotoğraflar
+    arasından tür güveni en yüksek olanı. Uzaktan çekilmiş bulanık kareye
+    bakıp "unknown" demek yerine, kullanıcının koyduğu net kareyi kullanır.
+    """
+    hayvanlilar = [o for o in oznitelikler if o["is_pet"]]
+    aday = hayvanlilar or oznitelikler
+    return max(aday, key=lambda o: o["species_confidence"])
+
+
+def urlleri_analiz_et(photo_urls: list[str]) -> dict:
+    """Adresleri indirip analiz eder — kuyruk akışının yaptığı iş."""
+    baytlar, basarisizlar = hepsini_indir(photo_urls)
+    return baytlari_analiz_et(baytlar, basarisizlar)

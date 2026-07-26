@@ -10,11 +10,12 @@ from starlette.concurrency import run_in_threadpool
 
 load_dotenv()
 
+from .analiz import urlleri_analiz_et
 from .attributes import attribute_analyzer
 from .embedder import embedder
-from .hatalar import GecersizGoruntu
+from .hatalar import AIHatasi, FotografIndirilemedi, GecersizGoruntu
 from .matcher import adaylari_eslestir, compute_final_score
-from .models import AnalyzeResponse, MatchRequest
+from .models import AnalyzeResponse, AnalyzeUrlRequest, MatchRequest
 from .surum import MODEL_SURUMU
 
 logging.basicConfig(level=logging.INFO)
@@ -105,6 +106,30 @@ async def analyze(file: UploadFile = File(...)):
         colors=vision["colors"],
         model_version=MODEL_SURUMU,
     )
+
+
+@app.post("/analyze_url")
+async def analyze_url(req: AnalyzeUrlRequest):
+    """
+    Fotoğrafları ADRESLERİNDEN indirip analiz et — üretim akışının yaptığı iş.
+
+    Kuyruk mesajı dosya değil URL taşıyor (büyük dosyaları kuyruktan geçirmemek
+    için). Bu endpoint, kuyruk tüketicisiyle aynı kodu çağırır; böylece akış
+    RabbitMQ kurulmadan da Swagger'dan denenebilir.
+
+    Bir fotoğraf indirilemezse diğerleriyle devam eder ve `failed_photos`
+    altında bildirir. Hiçbiri indirilemezse hata döner.
+    """
+    try:
+        return await run_in_threadpool(urlleri_analiz_et, req.photo_urls)
+    except FotografIndirilemedi as e:
+        # Kaynak sunucu kaynaklı: 502 (bizim değil, dış servisin sorunu)
+        raise HTTPException(502, {"code": e.KOD, "message": str(e)})
+    except AIHatasi as e:
+        raise HTTPException(400, {"code": e.KOD, "message": str(e)})
+    except Exception as e:
+        logger.error(f"Analiz hatası: {e}")
+        raise HTTPException(500, {"code": "INTERNAL", "message": "Analiz sırasında hata"})
 
 
 @app.post("/compare")
