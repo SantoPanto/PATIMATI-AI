@@ -1,12 +1,59 @@
 # app/embedder.py
 import io
 import logging
+from pathlib import Path
 
 import torch
-from PIL import Image
+from PIL import Image, ImageOps
 from transformers import CLIPModel, CLIPProcessor
 
+from .hatalar import GecersizGoruntu
+
 logger = logging.getLogger(__name__)
+
+# Bundan küçük görüntüler anlamlı bir vektör üretmez (1x1 bile sessizce
+# 512'lik bir vektör döndürüyordu — çöp veriyi veritabanına yazmayalım).
+ASGARI_KENAR = 32
+
+# PIL'in varsayılan "decompression bomb" sınırı ~89 megapiksel; bu, RGB olarak
+# ~268 MB bellek demek ve küçük bir konteyneri öldürür. 40 MP fazlasıyla yeterli.
+Image.MAX_IMAGE_PIXELS = 40_000_000
+
+
+def goruntu_ac(image_bytes: bytes) -> Image.Image:
+    """Ham baytları analize hazır RGB görüntüye çevirir.
+
+    Görüntü açma işi TEK BURADA yapılır — hem embedding hem renk analizi bunu
+    kullanır. Ayrı ayrı açılsaydı düzeltmelerden birini diğerine eklemeyi
+    unutmak çok kolay olurdu (ör. döndürmeyi ekleyip renkte unutmak).
+
+    Yapılanlar:
+      1. EXIF döndürmesini uygular — telefon fotoğrafları çoğu zaman "yan"
+         kaydedilir; düzeltilmezse vektör bozulur ve eşleştirme kötüleşir.
+      2. Şeffaflığı BEYAZ zemine yerleştirir — düz RGB'ye çevirmek şeffaf
+         alanları siyaha çevirip renk analizini bozuyordu.
+      3. Çok küçük görüntüleri reddeder.
+    """
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        img.load()
+    except Exception as e:
+        raise GecersizGoruntu(f"Görüntü açılamadı: {e}") from e
+
+    img = ImageOps.exif_transpose(img)
+
+    if img.mode in ("RGBA", "LA", "PA") or "transparency" in img.info:
+        img = img.convert("RGBA")
+        zemin = Image.new("RGBA", img.size, (255, 255, 255, 255))
+        img = Image.alpha_composite(zemin, img)
+
+    img = img.convert("RGB")
+
+    if min(img.size) < ASGARI_KENAR:
+        raise GecersizGoruntu(
+            f"Görüntü çok küçük: {img.size[0]}x{img.size[1]} "
+            f"(en az {ASGARI_KENAR}x{ASGARI_KENAR} olmalı)")
+    return img
 
 
 class PetEmbedder:
@@ -28,13 +75,11 @@ class PetEmbedder:
         Bir görüntüyü 512 boyutlu L2-normalize embedding'e dönüştürür.
         Dönüş: Python float listesi (JSON serileştirilebilir)
         """
-        img = Image.open(image_path).convert("RGB")
-        return self._embed_pil(img)
+        return self.embed_bytes(Path(image_path).read_bytes())
 
     def embed_bytes(self, image_bytes: bytes) -> list[float]:
-        """Byte dizisinden embedding çıkar (API endpoint'i için)."""
-        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        return self._embed_pil(img)
+        """Byte dizisinden embedding çıkar. Geçersiz görüntüde GecersizGoruntu fırlatır."""
+        return self._embed_pil(goruntu_ac(image_bytes))
 
     def embed_text(self, texts: list[str]) -> torch.Tensor:
         """Metin listesini L2-normalize CLIP embedding matrisine dönüştürür (zero-shot için)."""

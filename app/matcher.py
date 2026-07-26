@@ -1,21 +1,51 @@
 # app/matcher.py
+import logging
 import os
 
 import numpy as np
+
+from .hatalar import GecersizEmbedding
+from .surum import MODEL_SURUMU, VEKTOR_BOYUTU
+
+logger = logging.getLogger(__name__)
 
 # Bildirim eşiği — ortam değişkeninden ayarlanabilir (varsayılan 0.70,
 # 111 fotoğrafla ölçülerek doğrulandı; bkz. scripts/measure_threshold.py)
 MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.70"))
 
+# Sözleşmede aday üst sınırı 100; burada da zorluyoruz ki gelen liste büyükse
+# sessizce boğulmak yerine kırpıp raporlayalım (bkz. sözleşme §5).
+AZAMI_ADAY = int(os.getenv("MAX_CANDIDATES", "100"))
+AZAMI_SONUC = 20
+
+
+def dogrula_embedding(vektor, ad: str = "embedding") -> np.ndarray:
+    """Vektörü doğrular ve numpy dizisine çevirir; kullanılamazsa hata fırlatır.
+
+    Neden gerekli: doğrulama olmadan NaN içeren bir vektör skoru NaN yapıyordu.
+    NaN sessiz değil ama YANLIŞ YERDE patlıyor — JSON standardı NaN'ı desteklemediği
+    için mesaj Java tarafında ayrıştırılamıyor ve sonuç tamamen kayboluyordu.
+    Yanlış uzunluktaki vektör de yakalanmayan bir ValueError'a yol açıyordu.
+    """
+    if vektor is None or not hasattr(vektor, "__len__"):
+        raise GecersizEmbedding(f"{ad}: liste bekleniyordu, {type(vektor).__name__} geldi")
+    if len(vektor) != VEKTOR_BOYUTU:
+        raise GecersizEmbedding(
+            f"{ad}: {VEKTOR_BOYUTU} boyut bekleniyordu, {len(vektor)} geldi")
+    dizi = np.asarray(vektor, dtype=np.float32)
+    if not np.all(np.isfinite(dizi)):
+        raise GecersizEmbedding(f"{ad}: NaN veya sonsuz değer içeriyor")
+    return dizi
+
 
 def cosine_similarity(a: list, b: list) -> float:
-    """İki embedding vektörü arasında cosine similarity hesaplar."""
-    va, vb = np.array(a, dtype=np.float32), np.array(b, dtype=np.float32)
-    dot = np.dot(va, vb)
-    norm = np.linalg.norm(va) * np.linalg.norm(vb)
-    if norm == 0:
+    """İki embedding vektörü arasında cosine similarity hesaplar (asla NaN dönmez)."""
+    va = dogrula_embedding(a, "embedding_a")
+    vb = dogrula_embedding(b, "embedding_b")
+    norm = float(np.linalg.norm(va) * np.linalg.norm(vb))
+    if norm == 0.0:
         return 0.0
-    return float(np.clip(dot / norm, -1.0, 1.0))
+    return float(np.clip(float(np.dot(va, vb)) / norm, -1.0, 1.0))
 
 
 def jaccard_score(labels_a: list, labels_b: list) -> float:
@@ -32,8 +62,14 @@ def location_score(distance_km: float) -> float:
     """
     Mesafe bazlı skor: yakınsa yüksek, uzaksa düşük.
     0 km → 1.00, 5 km → 0.50, 20 km → 0.20, 50 km → 0.09
+
+    Negatif mesafe fiziksel olarak anlamsızdır ama gelirse iki ayrı hataya yol
+    açıyordu: -5 km ZeroDivisionError ile servisi çökertiyor, -1 km ise 1.25
+    döndürüp skoru üst sınırın üstüne çıkarıyordu. Sıfıra kırpıyoruz.
     """
-    return 1.0 / (1.0 + distance_km / 5.0)
+    if not np.isfinite(distance_km):
+        return 0.0
+    return 1.0 / (1.0 + max(0.0, float(distance_km)) / 5.0)
 
 
 def compute_final_score(
@@ -59,8 +95,10 @@ def compute_final_score(
     label = jaccard_score(labels_a, labels_b)
     location = location_score(distance_km)
 
+    # Kosinüs teorik olarak negatif olabildiği için toplam da [0,1] dışına
+    # çıkabilir; skor her zaman yorumlanabilir bir aralıkta kalsın.
     score = (0.55 * visual) + (0.30 * label) + (0.15 * location)
-    score = round(score, 4)
+    score = round(min(1.0, max(0.0, score)), 4)
 
     return {
         "score": score,
@@ -69,3 +107,61 @@ def compute_final_score(
         "location": round(location, 4),
         "match": score >= MATCH_THRESHOLD,
     }
+
+
+def adaylari_eslestir(embedding, labels, species, candidates,
+                      ad_id=None, model_version=MODEL_SURUMU):
+    """Adayları skorlar, sıralar; eleyip atladıklarını sayarak raporlar.
+
+    Tek bir bozuk aday tüm isteği düşürmemeli — o yüzden hatalı aday atlanır,
+    ama SESSİZCE atlanmaz: kaç tanesinin neden elendiği dönüş değerinde yer alır.
+    Sessiz eleme, "neden hiç eşleşme çıkmadı?" sorusunu cevapsız bırakır.
+
+    model_version: None verilirse sürüm denetimi yapılmaz. Varsayılan davranış
+    KATIDIR — sürümü tutmayan aday atlanır, çünkü farklı sürümle üretilmiş
+    vektörler kıyaslanamaz ve hata vermeden yanlış benzerlik üretir.
+
+    Dönüş: (eşleşmeler, atlananlar)
+    """
+    atlanan = {"toplam": 0, "kendisi": 0, "tekrar_eden": 0,
+               "model_surumu_uyusmuyor": 0, "gecersiz_embedding": 0,
+               "aday_siniri_asildi": 0}
+
+    if len(candidates) > AZAMI_ADAY:
+        atlanan["aday_siniri_asildi"] = len(candidates) - AZAMI_ADAY
+        logger.warning("Aday sayısı %d, sınır %d — fazlası kırpıldı.",
+                       len(candidates), AZAMI_ADAY)
+        candidates = candidates[:AZAMI_ADAY]
+
+    gorulen: set = set()
+    sonuclar = []
+    for aday in candidates:
+        if ad_id is not None and aday.ad_id == ad_id:
+            atlanan["kendisi"] += 1
+            continue
+        if aday.ad_id in gorulen:
+            atlanan["tekrar_eden"] += 1
+            continue
+        gorulen.add(aday.ad_id)
+
+        if model_version is not None and aday.model_version != model_version:
+            atlanan["model_surumu_uyusmuyor"] += 1
+            continue
+
+        try:
+            sonuc = compute_final_score(
+                embedding_a=embedding, embedding_b=aday.embedding,
+                labels_a=labels, labels_b=aday.labels,
+                distance_km=aday.distance_km,
+                species_a=species, species_b=aday.species,
+            )
+        except GecersizEmbedding as e:
+            logger.warning("Aday %s atlandı: %s", aday.ad_id, e)
+            atlanan["gecersiz_embedding"] += 1
+            continue
+
+        sonuclar.append({"ad_id": aday.ad_id, **sonuc})
+
+    atlanan["toplam"] = sum(v for k, v in atlanan.items() if k != "toplam")
+    sonuclar.sort(key=lambda x: x["score"], reverse=True)
+    return sonuclar[:AZAMI_SONUC], atlanan

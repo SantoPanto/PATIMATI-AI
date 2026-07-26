@@ -6,13 +6,16 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
 
 load_dotenv()
 
 from .attributes import attribute_analyzer
 from .embedder import embedder
-from .matcher import compute_final_score
+from .hatalar import GecersizGoruntu
+from .matcher import adaylari_eslestir, compute_final_score
 from .models import AnalyzeResponse, MatchRequest
+from .surum import MODEL_SURUMU
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -36,7 +39,8 @@ app.add_middleware(
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "model": "clip-vit-base-patch32"}
+    return {"status": "ok", "model": "clip-vit-base-patch32",
+            "model_version": MODEL_SURUMU}
 
 
 def _oznitelik_cikar(img_bytes: bytes, embedding: list[float]) -> dict:
@@ -50,7 +54,28 @@ def _oznitelik_cikar(img_bytes: bytes, embedding: list[float]) -> dict:
     except Exception as e:
         logger.error(f"Öznitelik çıkarma hatası (etiketsiz devam ediliyor): {e}")
         return {"labels": [], "species": "unknown", "species_confidence": 0.0,
-                "breed": None, "breed_confidence": 0.0, "pattern": None, "colors": []}
+                "is_pet": True, "breed": None, "breed_confidence": 0.0,
+                "pattern": None, "colors": []}
+
+
+async def _goruntuyu_isle(img_bytes: bytes) -> tuple[list[float], dict]:
+    """Embedding + öznitelik çıkarımını iş parçacığı havuzunda yapar.
+
+    CLIP çıkarımı CPU'yu saniyelerce meşgul eden senkron bir iştir. Doğrudan
+    `async def` içinde çağrılırsa olay döngüsünü (event loop) bloklar: o sırada
+    servis BAŞKA HİÇBİR isteğe cevap veremez, /health bile yanıtsız kalır.
+    Havuza taşıyınca sunucu cevap verebilir durumda kalıyor.
+    """
+    try:
+        embedding = await run_in_threadpool(embedder.embed_bytes, img_bytes)
+    except GecersizGoruntu as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.error(f"Embedding hatası: {e}")
+        raise HTTPException(500, "Analiz sırasında hata oluştu.")
+
+    vision = await run_in_threadpool(_oznitelik_cikar, img_bytes, embedding)
+    return embedding, vision
 
 
 @app.post("/analyze", response_model=AnalyzeResponse)
@@ -66,23 +91,19 @@ async def analyze(file: UploadFile = File(...)):
     if len(img_bytes) > 10 * 1024 * 1024:  # 10 MB limit
         raise HTTPException(413, "Dosya boyutu 10 MB'ı aşıyor.")
 
-    try:
-        embedding = embedder.embed_bytes(img_bytes)
-    except Exception as e:
-        logger.error(f"Embedding hatası: {e}")
-        raise HTTPException(500, "Analiz sırasında hata oluştu.")
-
-    vision = _oznitelik_cikar(img_bytes, embedding)
+    embedding, vision = await _goruntuyu_isle(img_bytes)
 
     return AnalyzeResponse(
         embedding=embedding,
         labels=vision["labels"],
         species=vision["species"],
         species_confidence=vision["species_confidence"],
+        is_pet=vision["is_pet"],
         breed=vision["breed"],
         breed_confidence=vision["breed_confidence"],
         pattern=vision["pattern"],
         colors=vision["colors"],
+        model_version=MODEL_SURUMU,
     )
 
 
@@ -104,16 +125,14 @@ async def compare(
         img_bytes = await f.read()
         if len(img_bytes) > 10 * 1024 * 1024:
             raise HTTPException(413, "Dosya boyutu 10 MB'ı aşıyor.")
-        embedding = embedder.embed_bytes(img_bytes)
-        attrs = _oznitelik_cikar(img_bytes, embedding)
-        analyses.append((embedding, attrs))
+        analyses.append(await _goruntuyu_isle(img_bytes))
 
     (emb1, a1), (emb2, a2) = analyses
     result = compute_final_score(emb1, emb2, a1["labels"], a2["labels"],
                                  distance_km, a1["species"], a2["species"])
 
     def _ozet(a):
-        return {"species": a["species"], "breed": a["breed"],
+        return {"species": a["species"], "is_pet": a["is_pet"], "breed": a["breed"],
                 "breed_confidence": a["breed_confidence"], "labels": a["labels"]}
 
     return {
@@ -129,23 +148,23 @@ async def compare(
 async def match(req: MatchRequest):
     """
     Yeni ilan ile mevcut ilanları karşılaştır, skorla sırala.
-    Spring Boot bu endpoint'i yeni ilan oluşturulduğunda çağırır.
-    """
-    results = []
-    for candidate in req.candidates:
-        result = compute_final_score(
-            embedding_a=req.embedding,
-            embedding_b=candidate.embedding,
-            labels_a=req.labels,
-            labels_b=candidate.labels,
-            distance_km=candidate.distance_km,
-            species_a=req.species,
-            species_b=candidate.species,
-        )
-        results.append({"pet_id": candidate.pet_id, **result})
 
-    results.sort(key=lambda x: x["score"], reverse=True)
-    return {"matches": results[:20]}  # En iyi 20 eşleşme
+    Elenen adaylar `skipped_candidates` altında gerekçesiyle raporlanır —
+    "hiç eşleşme çıkmadı" durumunun sebebi görünür olsun diye.
+    DİKKAT: adayların `model_version` alanı bu servisin sürümüyle aynı değilse
+    aday ATLANIR (farklı sürümlerin vektörleri kıyaslanamaz).
+    """
+    try:
+        matches, atlanan = adaylari_eslestir(
+            embedding=req.embedding, labels=req.labels, species=req.species,
+            candidates=req.candidates, ad_id=req.ad_id,
+        )
+    except Exception as e:  # sorgu vektörünün kendisi bozuksa
+        logger.error(f"Eşleştirme hatası: {e}")
+        raise HTTPException(400, f"Eşleştirme yapılamadı: {e}")
+
+    return {"matches": matches, "skipped_candidates": atlanan,
+            "model_version": MODEL_SURUMU}
 
 
 if __name__ == "__main__":

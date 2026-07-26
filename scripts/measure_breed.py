@@ -111,15 +111,16 @@ def main() -> None:
 
     # ---- 1. Tür doğruluğu -------------------------------------------------
     print("=" * 68)
-    print("1. TÜR (kedi/köpek) DOĞRULUĞU")
+    print("1. TÜR (kedi/köpek) DOĞRULUĞU + 'HAYVAN MI' KAPISI")
     print("=" * 68)
-    tur_dogru = tur_bilinmeyen = 0
+    tur_dogru = tur_bilinmeyen = hayvan_degil = 0
+    en_dusuk_guven = 1.0
     for o in ornekler:
-        img = torch.tensor(o["embedding"], dtype=torch.float32).unsqueeze(0)
-        tahmin, _ = attribute_analyzer._classify(
-            img, attribute_analyzer._species_feats, attribute_analyzer._species_keys,
-            min_prob=attribute_analyzer.SPECIES_MIN_PROB)
+        tahmin, guven, hayvan_mi = attribute_analyzer.predict_species(o["embedding"])
         o["tahmin_tur"] = tahmin
+        en_dusuk_guven = min(en_dusuk_guven, guven)
+        if not hayvan_mi:
+            hayvan_degil += 1
         if tahmin == "unknown":
             tur_bilinmeyen += 1
         elif tahmin == o["gercek_tur"]:
@@ -128,7 +129,13 @@ def main() -> None:
     print(f"  Doğru      : {yuzde(tur_dogru, n)}")
     print(f"  'unknown'  : {yuzde(tur_bilinmeyen, n)}   (güven eşiği "
           f"{attribute_analyzer.SPECIES_MIN_PROB} altında kalanlar)")
-    print(f"  Yanlış     : {yuzde(n - tur_dogru - tur_bilinmeyen, n)}\n")
+    print(f"  Yanlış     : {yuzde(n - tur_dogru - tur_bilinmeyen, n)}")
+    print()
+    print("  YANLIŞ REDDETME (kapının asıl riski) — hepsi gerçek hayvan fotoğrafı:")
+    print(f"    'hayvan değil' denenler : {yuzde(hayvan_degil, n)}  ← 0 olmalı")
+    print(f"    en düşük tür güveni     : {en_dusuk_guven:.4f}  "
+          f"(eşik {attribute_analyzer.SPECIES_MIN_PROB} — aradaki pay ne kadar dar?)")
+    print()
 
     # ---- 2-3. Cins doğruluğu ---------------------------------------------
     feats = irk_ozellikleri([BREED_PROMPT])

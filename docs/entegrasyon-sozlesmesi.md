@@ -75,7 +75,8 @@ Java → Python.
       "embedding": [0.0123, -0.0456, "... 512 adet float ..."],
       "labels": ["cat", "tabby", "brown", "white"],
       "species": "cat",
-      "distance_km": 1.2
+      "distance_km": 1.2,
+      "model_version": "clip-vit-base-patch32/v1"
     }
   ]
 }
@@ -100,9 +101,13 @@ Java → Python.
 | `labels` | string[] | adayın `ai_labels` sütunu |
 | `species` | string | adayın `ai_species` sütunu |
 | `distance_km` | double | PostGIS ile hesaplanan gerçek mesafe |
+| `model_version` | string | ⚠️ **Zorunlu.** Adayın `ai_model_version` sütunu. Servisin güncel sürümüyle aynı değilse aday **atlanır** — farklı sürümle üretilmiş vektörler kıyaslanamaz ve hata vermeden yanlış benzerlik üretir. Atlananlar `skipped_candidates` içinde raporlanır. |
 
 > `embedding` mesajda **JSON dizisi** olmalı, dizi içeren bir metin değil.
 > Java tarafında `float[]` olarak tutulursa Jackson bunu doğru üretir (bkz. §6).
+>
+> **Aday listesi ön elemesi:** AI tarafı ilanın kendisini (aynı `ad_id`), tekrar eden
+> adayları ve sürümü tutmayanları eler; 100'den fazlası kırpılır. Hepsi raporlanır.
 
 ---
 
@@ -118,13 +123,14 @@ Python → Java.
   "request_id": "9f1c2b7e-3a44-4a1e-9d55-0c2f6b1a77de",
   "ad_id": 123,
   "status": "ok",
-  "model_version": "clip-vit-base-patch32/attrs-v2",
+  "model_version": "clip-vit-base-patch32/v1",
   "analysis": {
     "embedding": [0.0123, -0.0456, "... 512 adet float ..."],
     "species": "cat",
     "species_confidence": 0.99,
+    "is_pet": true,
     "breed": "British Shorthair",
-    "breed_confidence": 0.42,
+    "breed_confidence": 0.88,
     "pattern": "tabby",
     "colors": [{ "name": "brown", "score": 0.41 }],
     "labels": ["cat", "tabby", "brown", "white"]
@@ -139,6 +145,14 @@ Python → Java.
       "match": true
     }
   ],
+  "skipped_candidates": {
+    "toplam": 2,
+    "kendisi": 0,
+    "tekrar_eden": 0,
+    "model_surumu_uyusmuyor": 2,
+    "gecersiz_embedding": 0,
+    "aday_siniri_asildi": 0
+  },
   "processed_at": "2026-07-26T12:00:00Z"
 }
 ```
@@ -148,8 +162,10 @@ Python → Java.
 | `model_version` | **Kritik.** Hangi model/ön işleme ile üretildiğini söyler. Java bunu `ai_model_version` sütununa yazar. Model değişirse eski vektörler kıyaslanamaz hâle gelir; bu alan olmadan hangilerinin bayat olduğu anlaşılamaz. |
 | `analysis.embedding` | 512 boyutlu, L2-normalize. `ai_embedding` sütununa yazılır. |
 | `analysis.species` | `cat` \| `dog` \| `unknown`. Güveni düşükse `unknown` döner. |
-| `analysis.breed` | Bilgi amaçlı. **Filtre olarak kullanılmaz** (bkz. §7). |
+| `analysis.is_pet` | `false` → fotoğrafta kedi/köpek görünmüyor (ekran görüntüsü, insan, nesne...). Arayüz kullanıcıdan başka bir fotoğraf isteyebilir. Ölçüm: 111 gerçek hayvan fotoğrafında **0 yanlış reddetme**; gerçek "hayvan olmayan fotoğraf" test kümesi henüz olmadığı için yakalama oranı ölçülmedi, bu yüzden kapı temkinli ayarlandı. |
+| `analysis.breed` | Bilgi amaçlı. **Filtre olarak kullanılmaz** (bkz. §7). `is_pet` false ise her zaman `null`. |
 | `matches` | Skora göre azalan sıralı, en fazla 20 kayıt. Aday yoksa boş dizi. |
+| `skipped_candidates` | Elenen adayların gerekçeli sayımı. "Hiç eşleşme çıkmadı" durumunun sebebi görünür olsun diye vardır — özellikle `model_surumu_uyusmuyor` sıfırdan büyükse ilgili ilanların yeniden analiz edilmesi gerekir. |
 | `matches[].match` | `score >= eşik` ise `true`. Eşik AI tarafında ortam değişkeniyle ayarlanır. |
 | `matches[].visual/label/location` | Skorun bileşenleri — hata ayıklama ve arayüzde gerekçe göstermek için. |
 
@@ -329,7 +345,8 @@ yazmaya gerek yok.
 | Taraf | Durum |
 |---|---|
 | Python AI — analiz (`/analyze`) | ✅ Çalışıyor (HTTP) |
-| Python AI — eşleştirme (`/match`) | ✅ Çalışıyor (HTTP), alan adları bu sözleşmeye göre güncellenecek |
+| Python AI — eşleştirme (`/match`) | ✅ Çalışıyor (HTTP), alan adları sözleşmeyle hizalandı (`ad_id`, `model_version`) |
+| Python AI — uç durum sağlamlaştırması | ✅ Negatif mesafe, NaN/bozuk vektör, kendisiyle eşleşme, tekrar eden aday, aday sınırı, çok küçük/bozuk görüntü, EXIF döndürme, şeffaf PNG, "hayvan mı" kapısı — 21 gerileme testi |
 | Python AI — cins (`breed`) | ✅ Yapıldı — 37 ırk zero-shot; top-1 %78, güven eşiği 0.70 üstünde %90 (ölçüm: `scripts/measure_breed.py`) |
 | Python AI — URL'den indirme | ⬜ Yapılacak |
 | Python AI — RabbitMQ tüketici/üretici | ⬜ Yapılacak |

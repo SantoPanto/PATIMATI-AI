@@ -5,16 +5,34 @@
 #   - desen (tabby/spotted/solid/bicolor): CLIP zero-shot
 #   - dominant renkler: piksel analizi (merkez kırpma + sabit palet)
 # Cevap biçimi Vision sürümüyle birebir aynıdır; Vision'a dönüş için app/vision.py duruyor.
-import io
 import os
 
 import numpy as np
 import torch
-from PIL import Image
 
-from .embedder import embedder
+from .embedder import embedder, goruntu_ac
 
 SPECIES_PROMPTS = {"cat": "a photo of a cat", "dog": "a photo of a dog"}
+
+# "Hayvan mı?" kapısı.
+# Tür seçimi YALNIZCA kedi/köpek arasında yapılırsa, hayvan olmayan bir fotoğraf da
+# zorunlu olarak birine atanır — softmax bir kazanan seçmek zorundadır. Güven eşiği
+# bunu ancak kısmen engeller (sentetik görüntülerde tuttu, ama insan/tavşan/kurt gibi
+# yapılı görüntülerde ikili seçim dengesizleşip eşiği aşabilir).
+# Çeldirici seçenekler ikili zorunlu seçimi açık uçlu hâle getirir: kazanan bir
+# çeldiriciyse tür "unknown" olur ve is_pet False döner.
+CELDIRICI_PROMPTS = [
+    "a photo of a person",
+    "a photo of a bird",
+    "a photo of a rabbit",
+    "a photo of a horse",
+    "a photo of a car",
+    "a photo of food",
+    "a photo of a building or a landscape",
+    "a photo of furniture or an object",
+    "a screenshot of text",
+    "a blank or solid color image",
+]
 
 # Oxford-IIIT Pet'in 37 ırkı (12 kedi + 25 köpek). Doğruluk ölçümü bu veri setiyle
 # yapıldığı için liste onunla aynı tutuldu — bkz. scripts/measure_breed.py.
@@ -85,6 +103,16 @@ PALETTE = {
 
 class AttributeAnalyzer:
     SPECIES_MIN_PROB = 0.8  # altında kalırsa "unknown" (tür filtresi yanlış eleme yapmasın)
+
+    # "Hayvan var mı" kapısı: kedi+köpek olasılık toplamı bunun altındaysa is_pet=False.
+    # 0.10 ölçümle seçildi (111 gerçek hayvan + sentetik/kırpma negatifleri):
+    #   gerçek hayvanlarda en düşük toplam 0.23 (2.3 kat pay), ortanca 0.96
+    #   sentetik görüntülerde (düz renk, gürültü, gradyan) 0.02–0.04
+    #   0.10'da yanlış reddetme 0/111
+    # UYARI: elimizde gerçek "hayvan olmayan fotoğraf" test kümesi YOK; kapının
+    # gerçek yakalama oranı henüz ölçülmedi. Bu yüzden temkinli (düşük) seçildi:
+    # şüpheli bir fotoğrafı geçirmek, gerçek bir ilanı reddetmekten iyidir.
+    PET_GATE_MIN = float(os.getenv("PET_GATE_MIN", "0.10"))
     # Cins güveni bunun altındaysa isim döndürülmez (yanlış cins göstermektense boş bırak).
     # 0.70 ölçümle seçildi (scripts/measure_breed.py, 111 fotoğraf):
     #   eşik 0.00 → fotoğrafların %100'üne cins verilir, verilenlerin %78'i doğru
@@ -96,7 +124,9 @@ class AttributeAnalyzer:
 
     def __init__(self):
         self._species_keys = list(SPECIES_PROMPTS)
-        self._species_feats = embedder.embed_text(list(SPECIES_PROMPTS.values()))
+        # Tür kapısı: [kedi, köpek, *çeldiriciler] — ilk iki sıra hayvan sınıflarıdır
+        self._tur_kapisi_feats = embedder.embed_text(
+            list(SPECIES_PROMPTS.values()) + CELDIRICI_PROMPTS)
         self._pattern_keys = list(PATTERN_PROMPTS)
         self._pattern_feats = embedder.embed_text(list(PATTERN_PROMPTS.values()))
 
@@ -110,14 +140,13 @@ class AttributeAnalyzer:
         }
 
     def analyze(self, image_bytes: bytes, embedding: list[float] | None = None) -> dict:
-        """{labels, species, species_confidence, breed, breed_confidence, pattern, colors}"""
+        """{labels, species, species_confidence, is_pet, breed, breed_confidence,
+        pattern, colors}"""
         if embedding is None:
             embedding = embedder.embed_bytes(image_bytes)
         img_feat = torch.tensor(embedding, dtype=torch.float32).unsqueeze(0)
 
-        species, species_conf = self._classify(
-            img_feat, self._species_feats, self._species_keys,
-            min_prob=self.SPECIES_MIN_PROB)
+        species, species_conf, is_pet = self.predict_species(img_feat)
         pattern, _ = self._classify(img_feat, self._pattern_feats, self._pattern_keys)
         breed, breed_conf = self.predict_breed(img_feat, species)
         colors = self._dominant_colors(image_bytes)
@@ -132,12 +161,49 @@ class AttributeAnalyzer:
             "labels": labels,
             "species": species,
             "species_confidence": round(species_conf, 4),
-            "breed": breed if breed_conf >= self.BREED_MIN_PROB else None,
+            "is_pet": is_pet,
+            # Hayvan değilse cins gösterme — "araba fotoğrafı: Pug" olmasın
+            "breed": breed if (is_pet and breed_conf >= self.BREED_MIN_PROB) else None,
             "breed_confidence": round(breed_conf, 4),
             "pattern": pattern,
             "colors": [{"r": c["r"], "g": c["g"], "b": c["b"], "score": c["score"]}
                        for c in colors],
         }
+
+    def predict_species(self, img_feat) -> tuple[str, float, bool]:
+        """(tür, güven, hayvan_mı) döner.
+
+        Güven her zaman "en olası hayvan sınıfının olasılığı"dır — çeldirici
+        kazansa bile bu değer anlamını korur.
+        Tür 'unknown' iki farklı sebeple dönebilir:
+          - is_pet=False : kazanan bir çeldirici, yani fotoğrafta kedi/köpek yok
+          - is_pet=True  : hayvan var ama kedi/köpek ayrımı yeterince net değil
+        """
+        if not isinstance(img_feat, torch.Tensor):
+            img_feat = torch.tensor(img_feat, dtype=torch.float32).unsqueeze(0)
+
+        sims = (img_feat @ self._tur_kapisi_feats.T).squeeze(0)
+        hayvan_sayisi = len(self._species_keys)
+
+        # İKİ AYRI SORU, İKİ AYRI YARIŞMA:
+        # 1) "Hayvan var mı?" — kedi+köpek olasılıklarının TOPLAMI bir eşiği aşıyor mu.
+        # "Kazanan çeldiriciyse reddet" kuralı fazla keskindi: bahçede yan duran
+        # açık renkli bir teriyer %73 ihtimalle "at" sayılıp reddediliyordu.
+        # Toplam ölçüt daha sağlam — o fotoğrafta kedi+köpek toplamı yine 0.23.
+        hayvan_toplam = float(torch.softmax(sims * 100, dim=-1)[:hayvan_sayisi].sum())
+        hayvan_mi = hayvan_toplam >= self.PET_GATE_MIN
+
+        # 2) "Kedi mi köpek mi?" — yalnızca ikisi arasında.
+        # Bu ayrım çeldiricilerle BİRLİKTE ölçülürse olasılıklar sulanıyor ve
+        # 2 seçenek için ayarlanmış 0.8 eşiği gerçek hayvanları eliyor
+        # (ölçümde tür doğruluğu %100'den %97.3'e düşmüştü).
+        tur_probs = torch.softmax(sims[:hayvan_sayisi] * 100, dim=-1)
+        en_iyi = int(tur_probs.argmax())
+        guven = float(tur_probs[en_iyi])
+
+        if not hayvan_mi or guven < self.SPECIES_MIN_PROB:
+            return "unknown", guven, hayvan_mi
+        return self._species_keys[en_iyi], guven, True
 
     def predict_breed(self, img_feat, species: str) -> tuple[str, float]:
         """En olası ırkı ve güvenini döner (eşik UYGULANMAZ — ham tahmin).
@@ -173,7 +239,9 @@ class AttributeAnalyzer:
 
     @staticmethod
     def _dominant_colors(image_bytes: bytes) -> list[dict]:
-        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        # Görüntüyü embedding ile AYNI şekilde açar (EXIF döndürme + şeffaflık
+        # düzeltmesi dahil) — yoksa renk analizi döndürülmemiş görüntüye bakardı
+        img = goruntu_ac(image_bytes)
         w, h = img.size
         # merkez kırpma: arka plan piksellerinin etkisini azalt
         img = img.crop((w // 6, h // 6, w * 5 // 6, h * 5 // 6)).resize((48, 48))
