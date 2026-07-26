@@ -39,6 +39,20 @@ async def health():
     return {"status": "ok", "model": "clip-vit-base-patch32"}
 
 
+def _oznitelik_cikar(img_bytes: bytes, embedding: list[float]) -> dict:
+    """Öznitelikleri çıkarır; hata olursa boş etiketlerle devam eder.
+
+    Embedding zaten hesaplandığı için eşleştirme etiketsiz de çalışır —
+    öznitelik hatası tüm analizi düşürmemeli.
+    """
+    try:
+        return attribute_analyzer.analyze(img_bytes, embedding)
+    except Exception as e:
+        logger.error(f"Öznitelik çıkarma hatası (etiketsiz devam ediliyor): {e}")
+        return {"labels": [], "species": "unknown", "species_confidence": 0.0,
+                "breed": None, "breed_confidence": 0.0, "pattern": None, "colors": []}
+
+
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze(file: UploadFile = File(...)):
     """
@@ -58,17 +72,16 @@ async def analyze(file: UploadFile = File(...)):
         logger.error(f"Embedding hatası: {e}")
         raise HTTPException(500, "Analiz sırasında hata oluştu.")
 
-    # Öznitelik hatası analizi engellemez: embedding döner, etiketler boş kalır
-    try:
-        vision = attribute_analyzer.analyze(img_bytes, embedding)
-    except Exception as e:
-        logger.error(f"Öznitelik çıkarma hatası (etiketsiz devam ediliyor): {e}")
-        vision = {"labels": [], "species": "unknown", "colors": []}
+    vision = _oznitelik_cikar(img_bytes, embedding)
 
     return AnalyzeResponse(
         embedding=embedding,
         labels=vision["labels"],
         species=vision["species"],
+        species_confidence=vision["species_confidence"],
+        breed=vision["breed"],
+        breed_confidence=vision["breed_confidence"],
+        pattern=vision["pattern"],
         colors=vision["colors"],
     )
 
@@ -92,19 +105,20 @@ async def compare(
         if len(img_bytes) > 10 * 1024 * 1024:
             raise HTTPException(413, "Dosya boyutu 10 MB'ı aşıyor.")
         embedding = embedder.embed_bytes(img_bytes)
-        try:
-            attrs = attribute_analyzer.analyze(img_bytes, embedding)
-        except Exception as e:
-            logger.error(f"Öznitelik çıkarma hatası (etiketsiz devam ediliyor): {e}")
-            attrs = {"labels": [], "species": "unknown", "colors": []}
+        attrs = _oznitelik_cikar(img_bytes, embedding)
         analyses.append((embedding, attrs))
 
     (emb1, a1), (emb2, a2) = analyses
     result = compute_final_score(emb1, emb2, a1["labels"], a2["labels"],
                                  distance_km, a1["species"], a2["species"])
+
+    def _ozet(a):
+        return {"species": a["species"], "breed": a["breed"],
+                "breed_confidence": a["breed_confidence"], "labels": a["labels"]}
+
     return {
-        "foto1": {"species": a1["species"], "labels": a1["labels"]},
-        "foto2": {"species": a2["species"], "labels": a2["labels"]},
+        "foto1": _ozet(a1),
+        "foto2": _ozet(a2),
         "sonuc": result,
         "aciklama": ("ESLESME: bildirim giderdi (skor >= esik)" if result["match"]
                      else "eslesme yok (0.50+ ise aday listesinde yine gorunurdu)"),

@@ -3,10 +3,14 @@ from pydantic import BaseModel
 
 
 class AnalyzeResponse(BaseModel):
-    embedding: list[float]   # 512 boyutlu CLIP vektörü
-    labels: list[str]        # Vision API etiketleri
-    species: str             # "cat" | "dog" | "unknown"
-    colors: list[dict]       # Dominant renkler
+    embedding: list[float]          # 512 boyutlu CLIP vektörü
+    labels: list[str]               # Eşleştirme skorunda kullanılan etiketler
+    species: str                    # "cat" | "dog" | "unknown"
+    species_confidence: float = 0.0
+    breed: str | None = None        # Güven eşiğinin altındaysa None
+    breed_confidence: float = 0.0
+    pattern: str | None = None      # tabby | spotted | solid | bicolor
+    colors: list[dict]              # Dominant renkler
 
 
 class MatchCandidate(BaseModel):

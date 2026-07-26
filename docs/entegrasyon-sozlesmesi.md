@@ -330,7 +330,7 @@ yazmaya gerek yok.
 |---|---|
 | Python AI — analiz (`/analyze`) | ✅ Çalışıyor (HTTP) |
 | Python AI — eşleştirme (`/match`) | ✅ Çalışıyor (HTTP), alan adları bu sözleşmeye göre güncellenecek |
-| Python AI — cins (`breed`) | ⬜ Yapılacak |
+| Python AI — cins (`breed`) | ✅ Yapıldı — 37 ırk zero-shot; top-1 %78, güven eşiği 0.70 üstünde %90 (ölçüm: `scripts/measure_breed.py`) |
 | Python AI — URL'den indirme | ⬜ Yapılacak |
 | Python AI — RabbitMQ tüketici/üretici | ⬜ Yapılacak |
 | Java — `Ad.photoUrls` | ⬜ KISIM 2'de |
