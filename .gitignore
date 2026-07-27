@@ -1,0 +1,23 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Gizli bilgiler — ASLA commit'lenmez
+.env
+google_key.json
+
+# Test verisi ve model önbelleği (herkes script'le kendi üretir)
+tests/data/
+tests/seed_data/
+tmp/
+.cache/
+
+# Gerçek dünya fotoğrafları — KVKK: sokak/iç mekân kareleri, uzaktan da olsa
+# insan içerebiliyor. Ölçüm betiği ve sonuç raporu repoda, fotoğraflar lokalde.
+tests/gercek_veri/
+
+# IDE
+.vscode/
+.idea/
