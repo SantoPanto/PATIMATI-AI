@@ -8,6 +8,7 @@ from PIL import Image, ImageOps
 from transformers import CLIPModel, CLIPProcessor
 
 from .hatalar import GecersizGoruntu
+from .surum import _SECIM
 
 logger = logging.getLogger(__name__)
 
@@ -102,5 +103,61 @@ class PetEmbedder:
         return features.squeeze().tolist()
 
 
+class KimlikGomucu:
+    """Eşleştirmede kullanılan vektörü üreten model.
+
+    ETİKETÇİDEN AYRI: `embedder` (CLIP) tür/desen/cins etiketlerini üretir,
+    bu sınıf ise yalnızca kimlik vektörünü. Ölçümle ayrıldılar — kimlik için
+    ince ayarlanmış modeller etiket işini yapamıyor (bkz. app/surum.py başlığı).
+
+    Seçim `KIMLIK_MODEL` ortam değişkeniyle yapılır. Varsayılan "clip" ise
+    AYRI BİR MODEL YÜKLENMEZ; etiketçi CLIP kimlik için de kullanılır, ek bellek
+    maliyeti sıfır olur ve davranış eskisiyle birebir aynı kalır.
+    """
+
+    def __init__(self, secim: dict, etiketci: PetEmbedder):
+        self.boyut = secim["boyut"]
+        # "clip" seçiliyse ikinci bir model yüklemenin anlamı yok
+        self._clip_mi = secim["kimlik"] == etiketci.MODEL_ID
+        if self._clip_mi:
+            self._etiketci = etiketci
+            logger.info("Kimlik vektörü etiketçi CLIP'ten alınacak (ek model yok).")
+            return
+
+        from transformers import AutoModel, AutoProcessor
+        logger.info("Kimlik modeli yükleniyor: %s", secim["kimlik"])
+        self._islemci = AutoProcessor.from_pretrained(secim["islemci"] or secim["kimlik"])
+        self._model, bilgi = AutoModel.from_pretrained(secim["kimlik"],
+                                                       output_loading_info=True)
+        # Ağırlıklar eksik yüklenirse transformers yalnızca UYARI basar ve model
+        # rastgele değerlerle çalışmaya devam eder. Bu, sessizce çöp vektör
+        # üretmek demektir — 2026-07-27'de tam bunu yaşadık (bkz. olcum-raporu §7).
+        eksik = bilgi.get("missing_keys") or []
+        uyusmayan = bilgi.get("mismatched_keys") or []
+        if eksik or uyusmayan:
+            raise RuntimeError(
+                f"{secim['kimlik']}: ağırlıklar tam yüklenmedi "
+                f"({len(eksik)} eksik, {len(uyusmayan)} uyuşmayan). "
+                f"Rastgele ağırlıkla çalışmaktansa başlatmıyoruz.")
+        self._model.eval()
+        logger.info("Kimlik modeli hazır (%d boyut).", self.boyut)
+
+    def embed_bytes(self, image_bytes: bytes) -> list[float]:
+        if self._clip_mi:
+            return self._etiketci.embed_bytes(image_bytes)
+        return self._embed_pil(goruntu_ac(image_bytes))
+
+    def _embed_pil(self, img: Image.Image) -> list[float]:
+        inputs = self._islemci(images=img, return_tensors="pt")
+        with torch.no_grad():
+            features = self._model.get_image_features(**inputs)
+        if not isinstance(features, torch.Tensor):
+            havuz = getattr(features, "pooler_output", None)
+            features = havuz if havuz is not None else features[0]
+        features = features / features.norm(dim=-1, keepdim=True)
+        return features.squeeze().tolist()
+
+
 # Singleton — uygulama başlangıcında bir kez yüklenir
 embedder = PetEmbedder()
+kimlik_gomucu = KimlikGomucu(_SECIM, embedder)

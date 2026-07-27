@@ -73,13 +73,13 @@ Java → Python.
     {
       "ad_id": 98,
       "embeddings": [
-        [0.0123, -0.0456, "... 512 adet float ..."],
+        [0.0123, -0.0456, "... 768 adet float ..."],
         [0.0311, -0.0122, "... ilanın ikinci fotoğrafı ..."]
       ],
       "labels": ["cat", "tabby", "brown", "white"],
       "species": "cat",
       "distance_km": 1.2,
-      "model_version": "clip-vit-base-patch32/v1"
+      "model_version": "siglip2-animal/v2"
     }
   ]
 }
@@ -100,7 +100,7 @@ Java → Python.
 | Alan | Tip | Kaynak |
 |---|---|---|
 | `ad_id` | long | aday ilanın kimliği |
-| `embeddings` | float[512][] | ⚠️ **Liste — ilanın her fotoğrafı için bir vektör.** Görsel skor tüm fotoğraf çiftlerinin **en iyisinden** alınır. Tek fotoğrafla eşleşme oranı gerçek veride %24'te kaldığı için çoklu fotoğraf zorunludur (bkz. `docs/olcum-raporu.md` §4). En az 1, en fazla 5. |
+| `embeddings` | float[768][] | ⚠️ **Liste — ilanın her fotoğrafı için bir vektör.** Görsel skor tüm fotoğraf çiftlerinin **en iyisinden** alınır. Tek fotoğrafla eşleşme oranı gerçek veride %24'te kaldığı için çoklu fotoğraf zorunludur (bkz. `docs/olcum-raporu.md` §4). En az 1, en fazla 5. |
 | `labels` | string[] | adayın `ai_labels` sütunu |
 | `species` | string | adayın `ai_species` sütunu |
 | `distance_km` | double | PostGIS ile hesaplanan gerçek mesafe |
@@ -126,10 +126,10 @@ Python → Java.
   "request_id": "9f1c2b7e-3a44-4a1e-9d55-0c2f6b1a77de",
   "ad_id": 123,
   "status": "ok",
-  "model_version": "clip-vit-base-patch32/v1",
+  "model_version": "siglip2-animal/v2",
   "analysis": {
     "embeddings": [
-      [0.0123, -0.0456, "... ilk fotoğrafın 512 float'ı ..."],
+      [0.0123, -0.0456, "... ilk fotoğrafın 768 float'ı ..."],
       [0.0311, -0.0122, "... ikinci fotoğrafın ..."]
     ],
     "species": "cat",
@@ -168,7 +168,7 @@ Python → Java.
 | Alan | Açıklama |
 |---|---|
 | `model_version` | **Kritik.** Hangi model/ön işleme ile üretildiğini söyler. Java bunu `ai_model_version` sütununa yazar. Model değişirse eski vektörler kıyaslanamaz hâle gelir; bu alan olmadan hangilerinin bayat olduğu anlaşılamaz. |
-| `analysis.embeddings` | Her fotoğraf için 512 boyutlu, L2-normalize vektör. `ai_embeddings` sütununa yazılır. Sırası `photo_urls` ile aynıdır. |
+| `analysis.embeddings` | Her fotoğraf için 768 boyutlu, L2-normalize vektör. `ai_embeddings` sütununa yazılır. Sırası `photo_urls` ile aynıdır. |
 | `matches[].photo_a` / `photo_b` | Hangi fotoğraf çiftinin eşleştiği (0 tabanlı indeks). Arayüzde "bu iki fotoğraf benziyor" diye gösterilebilir; hata ayıklamada hangi karenin tuttuğunu söyler. Tür uyuşmazlığında `null`. |
 | `analysis.species` | `cat` \| `dog` \| `unknown`. Güveni düşükse `unknown` döner. |
 | `analysis.is_pet` | `false` → fotoğrafta kedi/köpek görünmüyor (ekran görüntüsü, insan, nesne...). Arayüz kullanıcıdan başka bir fotoğraf isteyebilir. Ölçüm: 111 gerçek hayvan fotoğrafında **0 yanlış reddetme**; gerçek "hayvan olmayan fotoğraf" test kümesi henüz olmadığı için yakalama oranı ölçülmedi, bu yüzden kapı temkinli ayarlandı. |
@@ -224,7 +224,7 @@ Süzme kuralları:
 | Zaman penceresi | Son 90 gün | Eski ilanlar gürültü yaratır |
 | Üst sınır | 100 aday, mesafeye göre yakından uzağa | Mesaj boyutu ve işlem süresi |
 
-> **Not:** Aday başına ~5 KB (512 float). 100 aday ≈ 500 KB mesaj. RabbitMQ için
+> **Not:** Aday başına ~7 KB (768 float). 100 aday ≈ 500 KB mesaj. RabbitMQ için
 > sorun değil ama gereksiz büyümesin diye üst sınır konuldu. Aday sayısı binleri
 > bulursa çözüm `pgvector`'a geçmektir (Faz 2).
 

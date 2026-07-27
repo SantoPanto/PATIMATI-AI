@@ -12,11 +12,11 @@ load_dotenv()
 
 from .analiz import urlleri_analiz_et
 from .attributes import attribute_analyzer
-from .embedder import embedder
+from .embedder import PetEmbedder, embedder, kimlik_gomucu
 from .hatalar import AIHatasi, FotografIndirilemedi, GecersizGoruntu
 from .matcher import adaylari_eslestir, compute_final_score
 from .models import AnalyzeResponse, AnalyzeUrlRequest, MatchRequest
-from .surum import MODEL_SURUMU
+from .surum import MODEL_SURUMU, SECILEN_KIMLIK, VEKTOR_BOYUTU
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -40,18 +40,27 @@ app.add_middleware(
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "model": "clip-vit-base-patch32",
+    # İki model birden çalışıyor; hangisinin ne yaptığı buradan görünsün ki
+    # yanlış yapılandırmayla ayağa kalkan bir servis fark edilebilsin.
+    return {"status": "ok",
+            "etiket_modeli": PetEmbedder.MODEL_ID,
+            "kimlik_modeli": SECILEN_KIMLIK,
+            "vektor_boyutu": VEKTOR_BOYUTU,
             "model_version": MODEL_SURUMU}
 
 
-def _oznitelik_cikar(img_bytes: bytes, embedding: list[float]) -> dict:
+def _oznitelik_cikar(img_bytes: bytes) -> dict:
     """Öznitelikleri çıkarır; hata olursa boş etiketlerle devam eder.
 
     Embedding zaten hesaplandığı için eşleştirme etiketsiz de çalışır —
     öznitelik hatası tüm analizi düşürmemeli.
+
+    Kimlik vektörü buraya GEÇİRİLMEZ: kimlik modeli CLIP'ten farklıysa vektör
+    başka bir uzayda olur ve zero-shot metin karşılaştırması sessizce yanlış
+    etiket üretir. attribute_analyzer kendi CLIP vektörünü hesaplar.
     """
     try:
-        return attribute_analyzer.analyze(img_bytes, embedding)
+        return attribute_analyzer.analyze(img_bytes)
     except Exception as e:
         logger.error(f"Öznitelik çıkarma hatası (etiketsiz devam ediliyor): {e}")
         return {"labels": [], "species": "unknown", "species_confidence": 0.0,
@@ -68,14 +77,14 @@ async def _goruntuyu_isle(img_bytes: bytes) -> tuple[list[float], dict]:
     Havuza taşıyınca sunucu cevap verebilir durumda kalıyor.
     """
     try:
-        embedding = await run_in_threadpool(embedder.embed_bytes, img_bytes)
+        embedding = await run_in_threadpool(kimlik_gomucu.embed_bytes, img_bytes)
     except GecersizGoruntu as e:
         raise HTTPException(400, str(e))
     except Exception as e:
         logger.error(f"Embedding hatası: {e}")
         raise HTTPException(500, "Analiz sırasında hata oluştu.")
 
-    vision = await run_in_threadpool(_oznitelik_cikar, img_bytes, embedding)
+    vision = await run_in_threadpool(_oznitelik_cikar, img_bytes)
     return embedding, vision
 
 

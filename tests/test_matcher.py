@@ -3,11 +3,14 @@ import numpy as np
 import pytest
 
 from app.matcher import cosine_similarity, jaccard_score, compute_final_score
+from app.surum import VEKTOR_BOYUTU
 
 
-def make_embedding(seed=42, size=512):
+def make_embedding(seed=42, size=None):
+    # Boyut sabit yazılmaz: kimlik modeli değişince (KIMLIK_MODEL ortam
+    # değişkeni) vektör boyutu da değişiyor — CLIP 512, SigLIP2 768.
     rng = np.random.default_rng(seed)
-    v = rng.random(size).astype(np.float32)
+    v = rng.random(size or VEKTOR_BOYUTU).astype(np.float32)
     return (v / np.linalg.norm(v)).tolist()
 
 
