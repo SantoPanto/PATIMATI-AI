@@ -11,6 +11,7 @@ betikten gelir; hiçbiri tahmin değildir.
 | `scripts/measure_breed.py` | Tür ve cins doğruluğu (Oxford-IIIT Pet, 111 fotoğraf) |
 | `scripts/measure_threshold.py` | Eşik taraması (sentetik "aynı birey" simülasyonu) |
 | `scripts/gercek_veri_olcum.py` | **Gerçek dünya fotoğraflarıyla eşik ve hayvan kapısı doğrulaması** |
+| `scripts/teshis_arkaplan.py` | **Skor hayvandan mı arka plandan mı geliyor?** (tam / kırpılmış / hayvansız, AUC ile) |
 
 > **Veri notu:** Gerçek dünya fotoğrafları (`tests/gercek_veri/`) KVKK gereği
 > repoya dâhil edilmez — sokak ve iç mekân kareleri uzaktan da olsa insan
@@ -131,6 +132,53 @@ birbirine benziyor — arka plan (aynı mahalle, aynı kaldırım) ayırt edici 
 taşıyormuş. Dedektör ayrıca 7 fotoğrafın 2'sinde hayvanı hiç bulamadı.
 **Uygulanmadı.**
 
+---
+
+### 🔁 DÜZELTME (2026-07-27): yukarıdaki karar geçersiz
+
+Yukarıdaki tablo silinmedi, çünkü asıl ders onda: **yanlış ölçüt, doğru veriden
+yanlış karar üretir.** Karar iki ayrı kusura dayanıyordu.
+
+**Kusur 1 — ölçüt ölçeğe duyarlıydı.** "Ayrım gücü" iki ortalamanın farkıdır.
+Kırpma tüm skorları yukarı ittiğinde bu fark daralır, ama *sıralama kalitesi*
+artmış olabilir — nitekim artmıştı. Animal re-ID literatürünün kullandığı ölçütler
+ölçekten bağımsızdır: Rank-1, mAP, CMC, AUC.
+
+**Kusur 2 — negatif küme cevapla örtüşüyordu.** `scripts/gercek_veri_olcum.py`
+"farklı birey" grubunu `tests/seed_data/class_07`ten (Oxford stüdyo Bombay) alıyor:
+
+```
+aynı kedi  çiftleri = sokak fotoğrafı ↔ sokak fotoğrafı   (aynı mahalle)
+farklı kedi çiftleri = sokak fotoğrafı ↔ STÜDYO fotoğrafı
+```
+
+Arka plan tipi, etiketin kendisiyle birebir örtüşüyor. Arka planı gören herhangi
+bir model bu iki grubu hayvana hiç bakmadan ayırır. §6'da bu kümenin adil olmadığı
+zaten not edilmişti — ama karar yine o kümeyle verildi.
+
+**Yeniden ölçüm** (`scripts/teshis_arkaplan.py`, jaguar teşhis protokolü —
+arXiv 2604.09690). Üç koşul, **birebir aynı fotoğraf kümesi**, görsel AUC:
+
+| Koşul | Görsel AUC | Ne anlama geliyor |
+|---|---|---|
+| **TAM** — fotoğrafın kendisi (bugünkü sistem) | 0.793 | taban çizgisi |
+| **HAYVAN** — dedektör kutusuna kırpılmış | **1.000** | kırpma ayrımı yükseltiyor |
+| **ARKAPLAN** — hayvan silinmiş, sadece ortam | **0.800** | ⛔ hayvansız hâli, tam kareden **iyi** ayırıyor |
+
+Yani mevcut skorumuzun ayrımı hayvandan değil **ortamdan** geliyor; hayvan sinyali
+gürültü gibi davranıyor. Üründe bu ölümcül: KAYIP ilanı evde çekilir (koltuk,
+parke), BULUNDU ilanı sokakta. Arka planlar örtüşmez, ayrım da yok olur.
+
+**Bu düzeltmenin sınırları — kırpma "doğru" ilan edilmiyor:**
+- n küçük (10 aynı-çift, 15 farklı-çift). AUC 1.000 bu kümede gerçek, genel değil.
+- Negatif küme **hâlâ** stüdyo Bombay. Bu ölçüm tuzağı gösterir, kararı vermez.
+- Dedektör 7 fotoğrafın 2'sinde (%29) hayvanı bulamadı — kırpmaya geçmenin gerçek
+  bir işletme bedeli var, "bulamazsa ne olur" tasarlanmalı.
+
+**Durum:** kırpma kararı **yeniden açıldı**. Adil karar, aynı kaynaktan farklı
+bireyler içeren bir kümeyle verilecek (`wildlife-datasets` → `CatIndividualImages`,
+518 kedi / 13.536 fotoğraf). Bkz. §7.
+
 ### Uygulanan çözüm: çoklu fotoğraf
 
 İlan başına 3 fotoğraf, görsel skor **en iyi fotoğraf çiftinden**:
@@ -154,7 +202,8 @@ birden çok fotoğraf zorunlu kılar.**
 | Dağılımlar çakışıyor | İkili "eşleşti/eşleşmedi" kararı **bırakıldı**. Sistem sıralı aday listesi üretir, son onay kullanıcıdadır. |
 | Tek fotoğraf yetersiz | İlan başına çoklu fotoğraf **zorunlu**; skor en iyi çiftten |
 | Eşik 0.70 = düşük duyarlılık, sıfır yanlış alarm | Eşiğin anlamı değişti: "eşleşme" değil, **"bildirim gönderilecek kadar eminiz"**. Daha düşük skorlu adaylar listede görünür ama bildirim tetiklemez. |
-| Kırpma zarar veriyor | Uygulanmadı, gerekçesi kayıtlı |
+| ~~Kırpma zarar veriyor~~ → **karar geçersiz (27.07)** | Yeniden açıldı. Ölçüt ölçeğe duyarlıydı, negatif küme cevapla örtüşüyordu. Adil kümeyle tekrar ölçülecek |
+| Ayrımın kaynağı hayvan değil ortam (27.07) | Ölçüt olarak **AUC/Rank-1/mAP** kullanılacak; "ayrım gücü" bırakıldı |
 | Kapı gerçek negatiflerde %73 | Uyarı olarak kullanılır, ilan reddetmek için kullanılmaz |
 | Cins doğruluğu %78, melezlerde daha düşük | Cins **asla filtre değil**, yalnızca bilgi |
 
@@ -180,3 +229,66 @@ etiketler.json
 ```
 
 sonra `venv\Scripts\python.exe scripts/gercek_veri_olcum.py` çalıştırın.
+
+> **27.07 notu:** Bu tablodaki ilk iki satır (tek birey, adil olmayan negatif küme)
+> sanıldığından kolay kapanıyor. Birey etiketli **halka açık** veri kümeleri var —
+> §7'ye bakın. "Kendi fotoğraflarımızı toplamalıyız" varsayımı, bakmadığımız için
+> doğru sanılmıştı.
+
+---
+
+## 7. Sıradaki tur: model yarışı (27.07'de açıldı)
+
+Buradaki her ölçüm tek bir soruyu soruyor: *"CLIP'i tüm sahneye uygularsak nasıl
+ayarlarım?"* Hiçbiri *"CLIP'i tüm sahneye uygulamak doğru mu?"* diye sormuyor.
+Tek bir alternatif model denenmediği için "%24 iyi mi kötü mü" sorusunun cevabı yok.
+
+**Eksik olan bir model değil, kıyaslama düzeneği.**
+
+### Literatür taramasının gösterdiği
+
+Problemin alandaki adı **animal re-identification**. CLIP genel amaçlı bir
+görüntü-metin modeli; birey kimliği için tasarlanmadı. Bu iş için eğitilmiş,
+indirilmeye hazır modeller var:
+
+| Model | Not | CatIndividualImages Top-1 |
+|---|---|---|
+| `openai/clip-vit-base-patch32` | **bizim mevcut sistemimiz** | — (bizde AUC 0.79, ortamdan) |
+| `AvitoTech/CLIP-ViT-base-for-animal-identification` | aynı mimari, kimlik için ince ayarlı → en düşük geçiş maliyeti | — |
+| `AvitoTech/SigLIP2-Base-for-animal-identification` | 768 boyut | **%86.6** |
+| `BVRA/MegaDescriptor-L-384` | MIT lisans, tür bağımsız | — |
+
+Avito'nun makalesi (arXiv 2603.02270) birebir bizim problemimiz — "kayıp hayvanı
+sahibiyle buluşturma". 1.9M fotoğraf / 695.091 birey ile eğitilmiş; **ilan metnini
+eklemek görsele göre %11 iyileştirme** getirmiş.
+
+### Veri: `pip install wildlife-datasets`
+
+| Küme | Birey | Fotoğraf |
+|---|---|---|
+| `CatIndividualImages` | 518 kedi | 13.536 |
+| `DogFaceNet` | 1.393 köpek | 8.363 |
+| `MPDD` | 192 köpek | 1.657 |
+
+Bu kümelerde "farklı birey" çiftleri aynı kaynaktan geldiği için §6'daki adalet
+sorunu kendiliğinden çözülüyor.
+
+### Bu turun kuralları
+
+1. **Ölçüt ölçekten bağımsız olacak:** Rank-1/Top-1, mAP, CMC, AUC. "Ayrım gücü"
+   bir daha kullanılmayacak — bizi yanılttığı belgeli (§4 düzeltmesi).
+2. **Her iddia bir karşılaştırma olacak.** Mutlak sayı ("%78 doğruluk") bir
+   tasarımın yanlış olduğunu söyleyemez; bunu ancak aynı veride koşan bir
+   alternatif söyler.
+3. **Bileşen seçmeden önce alanda ne var / lisansı ne** diye bakılacak.
+   (Ultralytics YOLO **AGPL-3.0** — ticari kullanımda bedelli. RF-DETR Apache 2.0,
+   MegaDescriptor MIT. AvitoTech model kartlarında lisans **yazmıyor**.)
+
+### Bilinen engel
+
+`app/attributes.py` zero-shot etiketler için `embedder.embed_text()` çağırıyor.
+MegaDescriptor'ın metin kulesi yok; AvitoTech modellerinin metin hizası kimlik
+için ince ayarlı. Gömme modelini değiştirmek **skorun %30'unu oluşturan etiket
+katmanını kırar** ⇒ muhtemelen iki model gerekecek: etiketçi (CLIP, tür
+doğruluğunda %100) + kimlikçi (uzman model). `app/surum.py:VEKTOR_BOYUTU` ve
+`app/matcher.py:dogrula_embedding` 512'ye sabit; SigLIP2 768 üretiyor.
