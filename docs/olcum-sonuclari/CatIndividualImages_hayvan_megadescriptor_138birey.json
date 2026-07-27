@@ -1,0 +1,16 @@
+{
+  "top1": 0.9517625231910947,
+  "top5": 0.9795918367346939,
+  "map": 0.9129251192897095,
+  "roc_auc": 0.9832072782275281,
+  "eer": 0.05221256735483602,
+  "sorgu_sayisi": 539,
+  "aday": "megadescriptor",
+  "model": "hf-hub:BVRA/MegaDescriptor-L-384",
+  "boyut": 1536,
+  "veri": "CatIndividualImages_hayvan",
+  "birey": 138,
+  "fotograf": 539,
+  "tohum": 42,
+  "saniye_foto": 1.087
+}

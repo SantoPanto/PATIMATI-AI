@@ -237,58 +237,140 @@ sonra `venv\Scripts\python.exe scripts/gercek_veri_olcum.py` çalıştırın.
 
 ---
 
-## 7. Sıradaki tur: model yarışı (27.07'de açıldı)
+## 7. Model yarışı — altı aday, üç veri kümesi (2026-07-27/28)
 
-Buradaki her ölçüm tek bir soruyu soruyor: *"CLIP'i tüm sahneye uygularsak nasıl
-ayarlarım?"* Hiçbiri *"CLIP'i tüm sahneye uygulamak doğru mu?"* diye sormuyor.
-Tek bir alternatif model denenmediği için "%24 iyi mi kötü mü" sorusunun cevabı yok.
+### Neden yapıldı
 
-**Eksik olan bir model değil, kıyaslama düzeneği.**
+Bu rapordaki §2–§6 arası her ölçüm tek bir soruyu soruyor: *"CLIP'i tüm sahneye
+uygularsak nasıl ayarlarım?"* Hiçbiri *"CLIP'i tüm sahneye uygulamak doğru mu?"*
+diye sormuyor. Tek bir alternatif model bile denenmediği için "%24 iyi mi kötü mü"
+sorusunun cevabı yoktu. **Eksik olan bir model değil, kıyaslama düzeneğiydi.**
 
-### Literatür taramasının gösterdiği
+Düzenek: `scripts/model_yarisi.py`. Ham sonuçlar: `docs/olcum-sonuclari/*.json`.
 
-Problemin alandaki adı **animal re-identification**. CLIP genel amaçlı bir
-görüntü-metin modeli; birey kimliği için tasarlanmadı. Bu iş için eğitilmiş,
-indirilmeye hazır modeller var:
+### Karar kuralı
 
-| Model | Not | CatIndividualImages Top-1 |
+> Bir model, ancak **birden çok koşulda tutarlı** kazanıyorsa seçilir.
+
+Bu kural, §4 düzeltmesindeki hatanın tekrarını engellemek için kondu: tek koşulda
+ölçüp genellemek bu projede üç kez yanlış karar üretti.
+
+### Veri (hepsi halka açık, `wildlife-datasets` / Kaggle / Mendeley)
+
+| Küme | İçerik | Hazırlık | Lisans |
+|---|---|---|---|
+| DogFaceNet | 1.393 köpek / 5.327 foto | sıkı yüz kırpması 224×224 | CC BY 4.0 |
+| MPDD | 191 köpek / 762 foto | gevşek kırpma | CC BY 4.0 |
+| CatIndividualImages | 138 kedi / 540 foto | **tam sahne**, 3264×2448 telefon | CC BY 4.0 |
+
+### Sonuçlar
+
+**EER — bildirim kararında hata oranı (düşük iyi). Ürün için en önemli ölçüt.**
+
+| Model | DogFaceNet | MPDD | Kedi | Ortalama |
+|---|---|---|---|---|
+| **avito-siglip2** | **0.0654** | **0.0625** | **0.0285** | **0.052** |
+| avito-clip | 0.0708 | 0.1140 | 0.0642 | 0.083 |
+| google-siglip2 | 0.1262 | 0.0999 | 0.0463 | 0.091 |
+| google-siglip1 | 0.1247 | 0.1004 | 0.0466 | 0.091 |
+| **bizim (mevcut)** | 0.1888 | 0.1508 | 0.0603 | **0.113** |
+| megadescriptor | — (yavaş) | 0.1245 | 0.0548 | — |
+
+**Top-1 — sorguya en benzeyen fotoğraf doğru hayvan mı (yüksek iyi)**
+
+| Model | DogFaceNet | MPDD | Kedi |
+|---|---|---|---|
+| google-siglip1 | **%62.6** | %82.8 | %96.9 |
+| google-siglip2 | %60.5 | **%83.3** | **%97.0** |
+| avito-siglip2 | %55.5 | %76.8 | %94.8 |
+| avito-clip | %50.0 | %64.0 | %88.1 |
+| bizim | %48.5 | %69.9 | %94.4 |
+
+`avito-siglip2` **üç kümede de EER'de birinci**; Google modelleri Top-1'de
+birinci ama farkları küçük ve EER'de iki katı hata yapıyorlar. İkisi farklı
+yeteneği ölçüyor: Top-1 sıralamayı, EER skorların eşiğe göre ayrılabilirliğini.
+Ürünümüz bildirim eşiği kullandığı için **EER belirleyicidir**.
+
+### ⚠️ Arka plan ablasyonu — bu turun en önemli bulgusu
+
+Kedi fotoğraflarından hayvan silinip **yalnız arka planla** ölçüldü
+(`scripts/kosul_uret.py`). Rastgele taban ≈ %0.6.
+
+| Model | Tam sahne | Sadece arka plan | Hayvanın katkısı |
+|---|---|---|---|
+| google-siglip1 | %96.9 | %89.6 | 7.3 puan |
+| google-siglip2 | %97.0 | %88.3 | 8.7 puan |
+| megadescriptor | %95.9 | %83.9 | 12.0 puan |
+| **bizim** | %94.4 | **%79.4** | **15.0 puan** |
+| avito-clip | %88.1 | %50.6 | 37.5 puan |
+| **avito-siglip2** | %94.8 | **%53.4** | **41.4 puan** |
+
+Kedi kümesinde aynı hayvanın fotoğrafları aynı evde çekilmiş; arka plan kimliği
+ele veriyor. **Kedi tablosundaki mutlak sayılar bu yüzden şişkindir.**
+
+Yalnız `avito-siglip2` (ve daha zayıf hâliyle `avito-clip`) arka plan gidince
+gerçekten çöküyor — yani asıl bilgiyi hayvandan alıyorlar. Bu şaşırtıcı değil:
+AvitoTech modelleri 1.9M kayıp hayvan ilanıyla eğitilmiş, o veride aynı hayvan
+farklı ortamlarda göründüğü için model arka planı kullanmayı öğrenemiyor.
+
+**Yanlış çıkan bir çıkarım, kayda geçsin:** "arka plana yaslanan model, arka plan
+olmayınca çöker" diye öngörmüştük. DogFaceNet'te (arka plan yok) Google modelleri
+Top-1'de yine önde çıktı — öngörü yanlıştı. Ablasyon, modelin arka planı ne kadar
+*kodladığını* ölçüyor; ondan "hayvana bakmıyor" sonucu çıkmıyor. Doğru okuma:
+Google modelleri hem sahneyi hem hayvanı kodluyor, `avito-siglip2` ise ağırlıklı
+olarak hayvanı.
+
+### Kırpmanın etkisi
+
+Kedi verisinde dedektörle kırpıp tekrar ölçüldü: **fark gürültü mertebesinde**
+(±1 puan, yönü bile tutarsız). Sebep: bu fotoğraflar zaten yakın çekim, hayvan
+kareyi dolduruyor. §4'teki bulgu ise geniş sokak karelerindeydi.
+
+⇒ Doğru ifade "kırpma her zaman iyidir" değil, **"hayvan kareyi doldurmuyorsa
+kırpma önemlidir"**. Dedektör kedi fotoğraflarının %99.6'sında hayvanı buldu.
+
+### Lisanslar (HuggingFace API'den doğrulandı)
+
+| Model | Lisans | Ticari kullanım |
 |---|---|---|
-| `openai/clip-vit-base-patch32` | **bizim mevcut sistemimiz** | — (bizde AUC 0.79, ortamdan) |
-| `AvitoTech/CLIP-ViT-base-for-animal-identification` | aynı mimari, kimlik için ince ayarlı → en düşük geçiş maliyeti | — |
-| `AvitoTech/SigLIP2-Base-for-animal-identification` | 768 boyut | **%86.6** |
-| `BVRA/MegaDescriptor-L-384` | MIT lisans, tür bağımsız | — |
+| `google/siglip2-base-patch16-224` | apache-2.0 | ✅ |
+| `google/siglip-base-patch16-224` | apache-2.0 | ✅ |
+| `openai/clip-vit-base-patch32` | kartta yok; orijinal MIT | ✅ |
+| `BVRA/MegaDescriptor-L-384` | **cc-by-nc-4.0** | ❌ ticari YASAK |
+| `AvitoTech/*` (ikisi de) | **hiç alan yok** | ❌ izin belirsiz |
 
-Avito'nun makalesi (arXiv 2603.02270) birebir bizim problemimiz — "kayıp hayvanı
-sahibiyle buluşturma". 1.9M fotoğraf / 695.091 birey ile eğitilmiş; **ilan metnini
-eklemek görsele göre %11 iyileştirme** getirmiş.
+AvitoTech için üç kaynak da boş: model kartı README'si, HF API `cardData`, depo
+dosya listesi. Bir kullanıcı (`kh1nt`) 2026-07 başında aynı soruyu tartışma #3'te
+sormuş, **cevap gelmemiş**. Model Ocak 2026'dan beri güncellenmemiş.
 
-### Veri: `pip install wildlife-datasets`
+### Karar
 
-| Küme | Birey | Fotoğraf |
-|---|---|---|
-| `CatIndividualImages` | 518 kedi | 13.536 |
-| `DogFaceNet` | 1.393 köpek | 8.363 |
-| `MPDD` | 192 köpek | 1.657 |
+**Seçilen: `avito-siglip2`.** Gerekçe: üç veri kümesinin üçünde de en düşük hata
+oranı; mevcut modelimize göre bildirim kararında hata ~%11'den ~%5'e iniyor.
 
-Bu kümelerde "farklı birey" çiftleri aynı kaynaktan geldiği için §6'daki adalet
-sorunu kendiliğinden çözülüyor.
+**Lisans notu — bilerek alınmış risk.** İzin belirsiz. Staj kapsamında dağıtım
+yapılmadığı için kullanılıyor. **Bu servis ticarileşecekse model yeniden
+değerlendirilmelidir.** Yedek plan: `google/siglip2-base-patch16-224` (Apache 2.0,
+EER 0.091) ya da o tabandan kendi ince ayarımız — eğitim verisi olarak
+kullandığımız üç küme de CC BY 4.0, yani buna hukuken engel yok.
 
-### Bu turun kuralları
-
-1. **Ölçüt ölçekten bağımsız olacak:** Rank-1/Top-1, mAP, CMC, AUC. "Ayrım gücü"
-   bir daha kullanılmayacak — bizi yanılttığı belgeli (§4 düzeltmesi).
-2. **Her iddia bir karşılaştırma olacak.** Mutlak sayı ("%78 doğruluk") bir
-   tasarımın yanlış olduğunu söyleyemez; bunu ancak aynı veride koşan bir
-   alternatif söyler.
-3. **Bileşen seçmeden önce alanda ne var / lisansı ne** diye bakılacak.
-   (Ultralytics YOLO **AGPL-3.0** — ticari kullanımda bedelli. RF-DETR Apache 2.0,
-   MegaDescriptor MIT. AvitoTech model kartlarında lisans **yazmıyor**.)
-
-### Bilinen engel
+### Bilinen engel (uygulamaya geçerken)
 
 `app/attributes.py` zero-shot etiketler için `embedder.embed_text()` çağırıyor.
-MegaDescriptor'ın metin kulesi yok; AvitoTech modellerinin metin hizası kimlik
-için ince ayarlı. Gömme modelini değiştirmek **skorun %30'unu oluşturan etiket
-katmanını kırar** ⇒ muhtemelen iki model gerekecek: etiketçi (CLIP, tür
-doğruluğunda %100) + kimlikçi (uzman model). `app/surum.py:VEKTOR_BOYUTU` ve
-`app/matcher.py:dogrula_embedding` 512'ye sabit; SigLIP2 768 üretiyor.
+Gömme modelini değiştirmek **skorun %30'unu oluşturan etiket katmanını kırar**
+⇒ iki model gerekecek: etiketçi (CLIP, tür doğruluğunda %100) + kimlikçi
+(`avito-siglip2`). `app/surum.py:VEKTOR_BOYUTU` ve
+`app/matcher.py:dogrula_embedding` 512'ye sabit; SigLIP2 **768** üretiyor.
+Java tarafında `ai_*` kolonları henüz yazılmadı, yani boyut değişikliği şu an bedava.
+
+Ayrıca `AvitoTech` ağırlıkları olduğu gibi yüklenmiyor: 408 anahtarın hepsi
+`clip.` önekli ve `text_config.vocab_size` eksik. Düzeltilmezse model **rastgele
+ağırlıklarla, sessizce** yükleniyor (ilk ölçümümüzde Top-1 %20.2 çıktı).
+`scripts/model_yarisi.py` artık eksik ağırlıkta hata fırlatıyor.
+
+### Hâlâ ölçemediğimiz
+
+Halka açık köpek kümelerinin hepsi kırpık; **tam sahne köpek verisi yok**. Ve
+hiçbir küme gerçek kayıp/bulundu çifti değil — yani "kayıp fotoğrafı evde, bulundu
+fotoğrafı sokakta" senaryosu ölçülmedi. Bunun tek çözümü gerçek "sahibine kavuştu"
+ilanlarından çift toplamak.

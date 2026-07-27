@@ -1,0 +1,16 @@
+{
+  "top1": 0.718804920913884,
+  "top5": 0.8488576449912126,
+  "map": 0.5683904033766864,
+  "roc_auc": 0.9032708745344762,
+  "eer": 0.16565390189139265,
+  "sorgu_sayisi": 569,
+  "aday": "bizim",
+  "model": "bizim (clip-vit-base-patch32/v1)",
+  "boyut": 512,
+  "veri": "DogFaceNet",
+  "birey": 150,
+  "fotograf": 569,
+  "tohum": 42,
+  "saniye_foto": 0.046
+}

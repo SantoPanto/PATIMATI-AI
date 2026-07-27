@@ -49,7 +49,10 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 ROOT = Path(__file__).resolve().parent.parent
-SONUC_DIZIN = ROOT / "data" / "yarisma_sonuclari"
+# Sonuçlar depoya GİRER: dosyalar minik ve ölçüm raporunun ham kanıtı.
+# (data/ klasörü veri kümeleri için git dışında; sonuçları oraya koymak
+#  onları ekipten gizlerdi.)
+SONUC_DIZIN = ROOT / "docs" / "olcum-sonuclari"
 
 # --------------------------------------------------------------------------
 # Adaylar
@@ -82,7 +85,21 @@ ADAYLAR = {
     "megadescriptor": {
         "tur": "timm",
         "kimlik": "hf-hub:BVRA/MegaDescriptor-L-384",
-        "aciklama": "Mert'in modeli — tür bağımsız hayvan re-ID, MIT lisans (timm gerekir)",
+        "aciklama": "Hayvan re-ID uzmanı — DİKKAT: CC-BY-NC-4.0, ticari kullanım YASAK",
+    },
+    # Ticari kullanıma açık tek güçlü aday ailesi (Apache 2.0). AvitoTech bunları
+    # ince ayarlayıp yayınlamış ama kendi ağırlıklarına lisans koymamış; taban
+    # modeller ise net biçimde serbest. Ürünleşme ihtimali varsa karar bunlar
+    # arasından çıkmak zorunda.
+    "google-siglip2": {
+        "tur": "hf",
+        "kimlik": "google/siglip2-base-patch16-224",
+        "aciklama": "Google SigLIP2 tabanı — Apache 2.0, TİCARİ KULLANIMA AÇIK",
+    },
+    "google-siglip1": {
+        "tur": "hf",
+        "kimlik": "google/siglip-base-patch16-224",
+        "aciklama": "Google SigLIP1 tabanı — Apache 2.0, ticari kullanıma açık",
     },
 }
 
@@ -136,8 +153,32 @@ class HFGomucu(Gomucu):
         self.yigin = yigin
         # Ön işleme kaynağı ağırlıklardan farklı olabilir (bkz. ADAYLAR notu)
         self._islemci = AutoProcessor.from_pretrained(islemci or kimlik)
-        self._model = AutoModel.from_pretrained(kimlik)
+        self._model, bilgi = AutoModel.from_pretrained(kimlik, output_loading_info=True)
+        self._agirliklari_dogrula(kimlik, bilgi)
         self._model.eval()
+
+    @staticmethod
+    def _agirliklari_dogrula(kimlik, bilgi):
+        """Ağırlıklar gerçekten yüklendi mi? Yüklenmediyse GÜRÜLTÜLÜ çök.
+
+        27 Temmuz'da yaşanan gerçek hata: AvitoTech'in SigLIP2 deposundaki 408
+        anahtarın hepsi `clip.` önekiyle kaydedilmiş. transformers yalnızca model
+        sınıfının kendi önekini (SiglipModel için `siglip`) soyduğu için hiçbiri
+        eşleşmedi ve model TAMAMEN RASTGELE ağırlıklarla yüklendi — sadece bir
+        uyarı basarak. Ölçüm sessizce çalıştı ve Top-1 %20.2 verdi; en umut
+        verici adayı "kötü çıktı" diye eleyecektik.
+
+        Bir gömme modelinin ağırlıkları eksikse ölçüm geçersizdir. Sessiz yanlış
+        sonuç yerine açık hata verilmesi şart.
+        """
+        eksik = bilgi.get("missing_keys") or []
+        uyusmayan = bilgi.get("mismatched_keys") or []
+        if eksik or uyusmayan:
+            raise RuntimeError(
+                f"{kimlik}: ağırlıklar tam yüklenmedi "
+                f"({len(eksik)} eksik, {len(uyusmayan)} uyuşmayan anahtar). "
+                f"Ölçüm geçersiz olurdu. İlk eksikler: {eksik[:3]}"
+            )
 
     def kodla(self, yollar):
         parcalar = []
@@ -215,6 +256,70 @@ def gomucu_kur(anahtar) -> Gomucu:
 # --------------------------------------------------------------------------
 # Veri
 # --------------------------------------------------------------------------
+def _tabloyu_kur(ad, kok):
+    """(tam_yol, identity) tablosunu üretir. İki kaynak destekleniyor.
+
+    1) wildlife-datasets sınıfı — kütüphanenin kendi indirdiği kümeler için.
+    2) DÜZ KLASÖR: <kök>/<birey>/<fotoğraf>. Bu şart, çünkü (a) Kaggle'dan
+       parça parça indirdiğimiz kedi kümesi kütüphanenin beklediği arşiv
+       yapısında değil, (b) ileride kendi gerçek ilan fotoğraflarımızı da aynı
+       düzenekte ölçmek isteyeceğiz — onlar hiçbir kütüphanede yok.
+    """
+    import pandas as pd
+    kok = Path(kok)
+
+    try:
+        from wildlife_datasets import datasets
+        sinif = getattr(datasets, ad, None)
+        if sinif is not None:
+            df = sinif(str(kok)).df[["path", "identity"]].copy()
+            df["tam_yol"] = df["path"].apply(lambda p: str(kok / p))
+            return df
+    except Exception as e:
+        print(f"  (wildlife-datasets okuyamadı: {type(e).__name__} — düz klasör "
+              f"olarak deneniyor)")
+
+    satirlar = []
+    for birey_dizin in sorted(p for p in kok.iterdir() if p.is_dir()):
+        for foto in sorted(birey_dizin.iterdir()):
+            if foto.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"):
+                satirlar.append({"tam_yol": str(foto), "identity": birey_dizin.name,
+                                 "path": foto.name})
+    if not satirlar:
+        raise SystemExit(f"HATA: {kok} altında <birey>/<fotoğraf> yapısı bulunamadı.")
+    return pd.DataFrame(satirlar)
+
+
+def _cok_kucukleri_ele(df, asgari_kenar=32):
+    """Servisimizin reddettiği boyuttaki fotoğrafları TÜM adaylardan çıkarır.
+
+    app/embedder.py'de 32x32 altındaki görüntüler `GecersizGoruntu` ile
+    reddediliyor (bozuk/çöp veriden gelen anlamsız vektörlere karşı konmuş bir
+    koruma). MPDD kümesinde bu sınırın altında fotoğraflar var.
+
+    Böyle bir fotoğrafı sadece bizim modelimizin reddetmesi, diğerlerinin
+    işlemesi kıyası bozar — modeller farklı kümelerde sınanmış olur. Adil kıyas
+    için hepsi BİREBİR aynı fotoğrafları görmeli, o yüzden burada topluca eliyoruz.
+    """
+    from PIL import Image
+    tutulan, elenen = [], 0
+    for _, satir in df.iterrows():
+        try:
+            with Image.open(satir["tam_yol"]) as im:
+                if min(im.size) >= asgari_kenar:
+                    tutulan.append(satir)
+                else:
+                    elenen += 1
+        except Exception:
+            elenen += 1
+    if elenen:
+        print(f"  {elenen} fotoğraf elendi (servisimizin asgari {asgari_kenar}px "
+              f"sınırının altında ya da okunamıyor) — adil kıyas için tüm "
+              f"adaylardan çıkarıldı")
+    import pandas as pd
+    return pd.DataFrame(tutulan).reset_index(drop=True)
+
+
 def veri_yukle(ad, kok, birey_sayisi, foto_sayisi, tohum):
     """wildlife-datasets kümesinden dengeli bir alt küme seçer.
 
@@ -222,12 +327,8 @@ def veri_yukle(ad, kok, birey_sayisi, foto_sayisi, tohum):
     için birkaç yüz fotoğraf fazlasıyla yeter; kazanan sonra tam kümede doğrulanır.
     Tohum sabit — herkes aynı alt kümeyi alsın, kıyas anlamlı olsun.
     """
-    from wildlife_datasets import datasets
-
-    sinif = getattr(datasets, ad)
-    veri = sinif(str(kok))
-    df = veri.df[["path", "identity"]].copy()
-    df["tam_yol"] = df["path"].apply(lambda p: str(Path(kok) / p))
+    df = _tabloyu_kur(ad, kok)
+    df = _cok_kucukleri_ele(df)
 
     sayim = df.groupby("identity").size()
     uygun = sayim[sayim >= 2].index          # tek fotoğraflı birey sorgu olamaz
@@ -351,7 +452,10 @@ def main():
               f"mAP {sonuc['map']:.3f} · AUC {sonuc['roc_auc']:.4f} · "
               f"EER {sonuc['eer']:.4f} · {sonuc['saniye_foto']}sn/foto\n")
 
-        (SONUC_DIZIN / f"{a.veri}_{anahtar}.json").write_text(
+        # Dosya adında ÖLÇEK de var: aynı modelin 150 bireylik ve tam kümedeki
+        # sonuçları ayrı ayrı saklansın. (Önce yoktu ve tam küme sonucu, sonradan
+        # yapılan küçük bir doğrulama koşumu tarafından silinmişti.)
+        (SONUC_DIZIN / f"{a.veri}_{anahtar}_{sonuc['birey']}birey.json").write_text(
             json.dumps(sonuc, indent=2, ensure_ascii=False), encoding="utf-8")
 
     if not tablo:
