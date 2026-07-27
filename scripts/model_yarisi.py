@@ -91,12 +91,21 @@ ADAYLAR = {
 # Gömücü arayüzü — her aday bu sözleşmeyi uygular
 # --------------------------------------------------------------------------
 class Gomucu:
-    """Bir liste PIL görüntüsünü (n, d) boyutlu L2-normalize matrise çevirir."""
+    """Fotoğraf YOLLARININ listesini (n, d) boyutlu L2-normalize matrise çevirir.
+
+    Girdi neden PIL görüntüsü değil de yol? İki sebep:
+    1) Tam veri kümesinde 8.363 fotoğrafın hepsini birden bellekte açık tutmak
+       gerekmesin — her gömücü kendi yığını kadarını açsın.
+    2) Her model dosyayı KENDİ istediği gibi okusun. Önceden ortak bir PIL
+       nesnesi geçiriliyordu ve kendi modelimiz onu yeniden JPEG'e çevirmek
+       zorunda kalıyordu; bu, yalnız bize uygulanan bir kalite kaybıydı ve
+       kıyası kendi aleyhimize bozuyordu.
+    """
 
     ad = "?"
     boyut = 0
 
-    def kodla(self, resimler):
+    def kodla(self, yollar):
         raise NotImplementedError
 
 
@@ -111,14 +120,11 @@ class AppGomucu(Gomucu):
         self.ad = f"bizim ({MODEL_SURUMU})"
         self.boyut = 512
 
-    def kodla(self, resimler):
-        import io
-        cikti = []
-        for img in resimler:
-            tampon = io.BytesIO()
-            img.convert("RGB").save(tampon, format="JPEG", quality=95)
-            cikti.append(self._e.embed_bytes(tampon.getvalue()))
-        return np.asarray(cikti, dtype=np.float32)
+    def kodla(self, yollar):
+        # Servisin gerçek girdisi ham bayt — üretimde de böyle geliyor
+        return np.asarray(
+            [self._e.embed_bytes(Path(y).read_bytes()) for y in yollar],
+            dtype=np.float32)
 
 
 class HFGomucu(Gomucu):
@@ -133,10 +139,10 @@ class HFGomucu(Gomucu):
         self._model = AutoModel.from_pretrained(kimlik)
         self._model.eval()
 
-    def kodla(self, resimler):
+    def kodla(self, yollar):
         parcalar = []
-        for i in range(0, len(resimler), self.yigin):
-            grup = [r.convert("RGB") for r in resimler[i:i + self.yigin]]
+        for i in range(0, len(yollar), self.yigin):
+            grup = [Image.open(y).convert("RGB") for y in yollar[i:i + self.yigin]]
             girdi = self._islemci(images=grup, return_tensors="pt")
             with torch.no_grad():
                 ozellik = self._model.get_image_features(**girdi)
@@ -166,11 +172,11 @@ class TimmGomucu(Gomucu):
         yapilandirma = timm.data.resolve_model_data_config(self._model)
         self._donustur = timm.data.create_transform(**yapilandirma, is_training=False)
 
-    def kodla(self, resimler):
+    def kodla(self, yollar):
         parcalar = []
-        for i in range(0, len(resimler), self.yigin):
-            grup = torch.stack([self._donustur(r.convert("RGB"))
-                                for r in resimler[i:i + self.yigin]])
+        for i in range(0, len(yollar), self.yigin):
+            grup = torch.stack([self._donustur(Image.open(y).convert("RGB"))
+                                for y in yollar[i:i + self.yigin]])
             with torch.no_grad():
                 ozellik = self._model(grup)
             ozellik = ozellik / ozellik.norm(dim=-1, keepdim=True)
@@ -180,12 +186,27 @@ class TimmGomucu(Gomucu):
         return sonuc
 
 
+def yerel_kopya(anahtar):
+    """data/models/<anahtar> altında elle indirilmiş bir kopya varsa onu kullan.
+
+    Neden: HuggingFace indiricisi yavaş/kesintili bağlantılarda yeniden denemiyor,
+    yarım dosyada saatlerce asılı kalabiliyor. Büyük modelleri `curl -C -` ile
+    (kaldığı yerden devam + yeniden deneme) indirip buraya koymak daha güvenilir.
+    """
+    yol = ROOT / "data" / "models" / anahtar
+    return yol if (yol / "config.json").exists() else None
+
+
 def gomucu_kur(anahtar) -> Gomucu:
     aday = ADAYLAR[anahtar]
     if aday["tur"] == "app":
         return AppGomucu()
     if aday["tur"] == "hf":
-        return HFGomucu(aday["kimlik"], islemci=aday.get("islemci"))
+        yerel = yerel_kopya(anahtar)
+        if yerel:
+            print(f"    (yerel kopya kullanılıyor: {yerel})")
+        return HFGomucu(str(yerel) if yerel else aday["kimlik"],
+                        islemci=aday.get("islemci"))
     if aday["tur"] == "timm":
         return TimmGomucu(aday["kimlik"])
     raise ValueError(aday["tur"])
@@ -297,7 +318,7 @@ def main():
     alt = veri_yukle(a.veri, kok, a.birey, a.foto, a.tohum)
     print(f"  seçilen: {len(alt)} fotoğraf, {alt['identity'].nunique()} birey\n")
 
-    resimler = [Image.open(p) for p in alt["tam_yol"]]
+    yollar = alt["tam_yol"].tolist()
     kimlikler = alt["identity"].tolist()
 
     secilenler = list(ADAYLAR) if a.model == "hepsi" else [a.model]
@@ -316,14 +337,14 @@ def main():
             continue
 
         basla = time.time()
-        vektorler = g.kodla(resimler)
+        vektorler = g.kodla(yollar)
         sure = time.time() - basla
         sonuc = olc(vektorler, kimlikler)
         sonuc.update({
             "aday": anahtar, "model": g.ad, "boyut": int(vektorler.shape[1]),
             "veri": a.veri, "birey": int(alt["identity"].nunique()),
             "fotograf": len(alt), "tohum": a.tohum,
-            "saniye_foto": round(sure / len(resimler), 3),
+            "saniye_foto": round(sure / len(yollar), 3),
         })
         tablo.append(sonuc)
         print(f"    Top-1 {sonuc['top1']:.1%} · Top-5 {sonuc['top5']:.1%} · "
