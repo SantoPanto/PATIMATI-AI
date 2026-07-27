@@ -6,18 +6,30 @@ import torch.nn.functional as F
 import torchvision.transforms.functional as TF
 import matplotlib.pyplot as plt
 
+import torch
+import timm
+from pathlib import Path
+
+from PIL import Image
+import matplotlib.pyplot as plt
+import torch.nn.functional as F
+from torchvision import transforms
+import torchvision.transforms.functional as TF
+
+ROOT = Path(__file__).resolve().parent
+
 print("1. AI Modeli Yükleniyor...")
-model = timm.create_model('hf_hub:BVRA/MegaDescriptor-T-224', pretrained=True)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = timm.create_model('hf_hub:BVRA/MegaDescriptor-T-224', pretrained=True, num_classes=0)
 model.eval()
+model.to(device)
+
+data_cfg = timm.data.resolve_model_data_config(model)
+embed_transform = timm.data.create_transform(**data_cfg, is_training=False)
 
 def resmi_vektore_cevir(img):
-    transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
-    tensor_resim = transform(img).unsqueeze(0)
-    with torch.no_grad():
+    tensor_resim = embed_transform(img.convert("RGB")).unsqueeze(0).to(device)
+    with torch.inference_mode():
         return model(tensor_resim)
 
 orijinal_img = Image.open("degerlendirme/test_resim.jpg").convert('RGB')
