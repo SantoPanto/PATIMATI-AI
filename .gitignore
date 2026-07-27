@@ -21,3 +21,6 @@ tests/gercek_veri/
 # IDE
 .vscode/
 .idea/
+
+# Olcum veri kumeleri (halka acik, indirilebilir - depoya girmez)
+data/
