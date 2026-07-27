@@ -32,7 +32,7 @@ def resmi_vektore_cevir(img):
     with torch.inference_mode():
         return model(tensor_resim)
 
-orijinal_img = Image.open("degerlendirme/test_resim.jpg").convert('RGB')
+orijinal_img = Image.open(ROOT / "test_resim.jpg").convert('RGB')
 orijinal_vektor = resmi_vektore_cevir(orijinal_img)
 
 # ==========================================
