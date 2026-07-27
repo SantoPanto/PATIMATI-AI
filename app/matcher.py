@@ -120,6 +120,15 @@ def compute_final_score(
     # Tür uyumsuzluğu — erken çıkış.
     # Cevap şekli normal yolla BİREBİR aynı olmalı: eksik anahtar Spring
     # tarafındaki DTO'yu kırıyordu (demo sırasında bulunan gerçek bir hataydı).
+    #
+    # Tür değerleri BÜYÜK/KÜÇÜK HARF duyarsız karşılaştırılır. Sözleşme küçük
+    # harf diyor ("cat"), ama Java tarafındaki enum büyük harf üretiyor ("CAT")
+    # ve @Enumerated(EnumType.STRING) bunu olduğu gibi JSON'a koyuyor. Düz metin
+    # karşılaştırmasında "CAT" != "cat" olduğu için HER aday sıfırlanırdı —
+    # hata vermeden, sadece hiç eşleşme bulunmayarak. Gönderene sıkı, alana
+    # hoşgörülü olmak bu sınıf hatayı tümden kapatıyor.
+    species_a = (species_a or "unknown").strip().lower()
+    species_b = (species_b or "unknown").strip().lower()
     if (species_a != "unknown" and species_b != "unknown"
             and species_a != species_b):
         return {"score": 0.0, "visual": 0.0, "label": 0.0, "location": 0.0,
