@@ -1,0 +1,16 @@
+{
+  "top1": 0.9592592592592593,
+  "top5": 0.9814814814814815,
+  "map": 0.9103965469145168,
+  "roc_auc": 0.9837475168780593,
+  "eer": 0.054831243306732995,
+  "sorgu_sayisi": 540,
+  "aday": "megadescriptor",
+  "model": "hf-hub:BVRA/MegaDescriptor-L-384",
+  "boyut": 1536,
+  "veri": "CatIndividualImages",
+  "birey": 138,
+  "fotograf": 540,
+  "tohum": 42,
+  "saniye_foto": 1.133
+}

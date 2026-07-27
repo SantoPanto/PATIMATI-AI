@@ -1,0 +1,16 @@
+{
+  "top1": 0.62586821850948,
+  "top5": 0.7640322883424067,
+  "map": 0.47544443045226836,
+  "roc_auc": 0.9453159872860841,
+  "eer": 0.12468422296579357,
+  "sorgu_sayisi": 5327,
+  "aday": "google-siglip1",
+  "model": "google/siglip-base-patch16-224",
+  "boyut": 768,
+  "veri": "DogFaceNet",
+  "birey": 1393,
+  "fotograf": 5327,
+  "tohum": 42,
+  "saniye_foto": 0.14
+}

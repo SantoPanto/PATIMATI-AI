@@ -1,0 +1,16 @@
+{
+  "top1": 0.8814814814814815,
+  "top5": 0.9574074074074074,
+  "map": 0.8061610662606445,
+  "roc_auc": 0.9782652876988589,
+  "eer": 0.0641655439251045,
+  "sorgu_sayisi": 540,
+  "aday": "avito-clip",
+  "model": "AvitoTech/CLIP-ViT-base-for-animal-identification",
+  "boyut": 512,
+  "veri": "CatIndividualImages",
+  "birey": 138,
+  "fotograf": 540,
+  "tohum": 42,
+  "saniye_foto": 0.135
+}

@@ -1,0 +1,16 @@
+{
+  "top1": 0.9406307977736549,
+  "top5": 0.987012987012987,
+  "map": 0.9157745216536017,
+  "roc_auc": 0.9922841048225933,
+  "eer": 0.028807411979278635,
+  "sorgu_sayisi": 539,
+  "aday": "avito-siglip2",
+  "model": "C:\\Users\\İbrahim\\Desktop\\Pati Proje\\PATIMATI-AI\\data\\models\\avito-siglip2",
+  "boyut": 768,
+  "veri": "CatIndividualImages_hayvan",
+  "birey": 138,
+  "fotograf": 539,
+  "tohum": 42,
+  "saniye_foto": 0.156
+}

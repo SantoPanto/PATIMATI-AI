@@ -1,0 +1,16 @@
+{
+  "top1": 0.7258347978910369,
+  "top5": 0.8717047451669596,
+  "map": 0.612237475953029,
+  "roc_auc": 0.9473318792093943,
+  "eer": 0.12153177303288323,
+  "sorgu_sayisi": 569,
+  "aday": "megadescriptor",
+  "model": "hf-hub:BVRA/MegaDescriptor-L-384",
+  "boyut": 1536,
+  "veri": "DogFaceNet",
+  "birey": 150,
+  "fotograf": 569,
+  "tohum": 42,
+  "saniye_foto": 1.093
+}
