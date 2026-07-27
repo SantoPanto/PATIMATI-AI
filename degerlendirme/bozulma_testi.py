@@ -53,8 +53,10 @@ plt.plot([str(d) for d in bulaniklik_dereceleri], blur_skorlar, marker='o', colo
 plt.title('Yapay Zeka Bulanıklık Dayanıklılık Testi')
 plt.xlabel('Bulanıklık Çekirdek Boyutu')
 plt.ylabel('Eşleşme Skoru (%)')
-plt.grid(True); plt.ylim(0, 105)
-plt.savefig("degerlendirme/bulaniklik_grafigi.png")
+plt.grid(True)
+plt.ylim(0, 105)
+plt.savefig(ROOT / "bulaniklik_grafigi.png")
+plt.close()
 
 # ==========================================
 # TEST 2: KARANLIK (GECE ÇEKİMİ) TESTİ
