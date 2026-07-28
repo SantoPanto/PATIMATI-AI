@@ -224,7 +224,7 @@ Süzme kuralları:
 | Zaman penceresi | Son 90 gün | Eski ilanlar gürültü yaratır |
 | Üst sınır | 100 aday, mesafeye göre yakından uzağa | Mesaj boyutu ve işlem süresi |
 
-> **Not:** Aday başına ~7 KB (768 float). 100 aday ≈ 500 KB mesaj. RabbitMQ için
+> **Not:** Aday başına ~7 KB (768 float). 100 aday ≈ 700 KB mesaj. RabbitMQ için
 > sorun değil ama gereksiz büyümesin diye üst sınır konuldu. Aday sayısı binleri
 > bulursa çözüm `pgvector`'a geçmektir (Faz 2).
 

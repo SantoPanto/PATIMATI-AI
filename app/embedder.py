@@ -135,12 +135,54 @@ class KimlikGomucu:
         eksik = bilgi.get("missing_keys") or []
         uyusmayan = bilgi.get("mismatched_keys") or []
         if eksik or uyusmayan:
-            raise RuntimeError(
-                f"{secim['kimlik']}: ağırlıklar tam yüklenmedi "
-                f"({len(eksik)} eksik, {len(uyusmayan)} uyuşmayan). "
-                f"Rastgele ağırlıkla çalışmaktansa başlatmıyoruz.")
+            onarilmis = self._onekli_agirliklari_onar(secim["kimlik"])
+            if onarilmis is None:
+                raise RuntimeError(
+                    f"{secim['kimlik']}: ağırlıklar tam yüklenmedi "
+                    f"({len(eksik)} eksik, {len(uyusmayan)} uyuşmayan). "
+                    f"Rastgele ağırlıkla çalışmaktansa başlatmıyoruz.")
+            self._model = onarilmis
         self._model.eval()
         logger.info("Kimlik modeli hazır (%d boyut).", self.boyut)
+
+    @staticmethod
+    def _onekli_agirliklari_onar(kimlik):
+        """Tüm anahtarları ortak önek taşıyan checkpoint'i yüklenebilir hâle getirir.
+
+        AvitoTech'in SigLIP2 deposunda 408 anahtarın hepsi `clip.` önekli ve
+        `text_config.vocab_size` eksik. transformers yalnızca hedef sınıfın kendi
+        önekini soyduğu için hiçbiri tutmuyor ve model RASTGELE ağırlıkla yükleniyor
+        — hata değil, yalnızca uyarı basarak.
+
+        Onarım burada olmalı: elle düzeltilmiş yerel bir kopyaya bağlı kalırsak
+        modeli ekipten kimse kullanamaz (2026-07-28'de tam bu oldu).
+        Tanımadığı bir durumda None döner, çağıran taraf hata fırlatır.
+        """
+        from huggingface_hub import hf_hub_download
+        from safetensors.torch import load_file
+        from transformers import AutoConfig, AutoModel
+
+        yol = Path(kimlik)
+        dosya = (yol / "model.safetensors") if yol.exists() else Path(
+            hf_hub_download(kimlik, "model.safetensors"))
+        sd = load_file(str(dosya))
+
+        onek = "clip."
+        if not sd or not all(k.startswith(onek) for k in sd):
+            return None
+        sd = {k[len(onek):]: v for k, v in sd.items()}
+
+        cfg = AutoConfig.from_pretrained(kimlik)
+        gomme = sd.get("text_model.embeddings.token_embedding.weight")
+        if gomme is not None and hasattr(cfg, "text_config"):
+            cfg.text_config.vocab_size = gomme.shape[0]
+
+        model = AutoModel.from_config(cfg)
+        eksik, _ = model.load_state_dict(sd, strict=False)
+        if eksik:
+            return None
+        logger.info("Kimlik modeli onarıldı: '%s' öneki soyuldu", onek)
+        return model
 
     def embed_bytes(self, image_bytes: bytes) -> list[float]:
         if self._clip_mi:
