@@ -414,7 +414,7 @@ yazmaya gerek yok.
 | Python AI — SSRF koruması | ✅ Beyaz liste, yerel ağ engeli, bağlantı-yerel mutlak yasak, yönlendirme yok, boyut/zaman sınırı |
 | Python AI — cins (`breed`) | ✅ Yapıldı — 37 ırk zero-shot; top-1 %78, güven eşiği 0.70 üstünde %90 (ölçüm: `scripts/measure_breed.py`) |
 | Python AI — RabbitMQ tüketici/üretici | ✅ `app/kuyruk.py` — topoloji, tüketici, üretici, DLQ, yeniden bağlanma. Ayrı süreç: `python -m app.kuyruk`. 21 test broker olmadan koşuyor (`tests/test_kuyruk.py`) |
-| Python AI — uçtan uca kanıt | ✅ **Gerçek broker üzerinde koşturuldu** (2026-07-28, RabbitMQ 4.3.4 + Erlang 27.3.4.13). `scripts/sahte_java.py` Java'nın yerine geçip istek yayınladı, sonuç 1,3 sn'de döndü ve sözleşme denetimini geçti. `--hata-yollari` kipiyle DLQ ve hata cevabı da doğrulandı |
+| Python AI — uçtan uca kanıt | ✅ **Gerçek broker üzerinde koşturuldu** (2026-07-28, RabbitMQ 4.3.4 + Erlang 27.3.4.13). `scripts/sahte_java.py` Java'nın yerine geçip istek yayınladı, sonuç 2,4 sn'de döndü ve sözleşme denetimini geçti — **`siglip2-animal/v2`, 768 boyutlu vektör**, yani bu belgedeki boyutla birebir. `--hata-yollari` kipiyle DLQ ve hata cevabı da doğrulandı |
 | Java — `Ad.photoUrls` | ⬜ KISIM 2'de |
 | Java — `ai_*` alanları | ⬜ AI sorumlusunda |
 | Java — kuyruk config + publisher + listener | ⬜ AI sorumlusunda |
