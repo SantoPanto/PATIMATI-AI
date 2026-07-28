@@ -37,7 +37,7 @@ sys.path.insert(0, str(ROOT))
 
 # `app.kuyruk` DEĞİL `app.topoloji`: kuyruk modülünü içe aktarmak modeli de
 # yükler (~25 sn). Bu betiğin modele ihtiyacı yok, sadece JSON yayınlıyor.
-from app.topoloji import (AMQP_URL, EXCHANGE, ISTEK_ANAHTARI, SEMA_SURUMU,
+from app.topoloji import (AMQP_URL, DLQ, EXCHANGE, ISTEK_ANAHTARI, SEMA_SURUMU,
                           SONUC_KUYRUGU, topolojiyi_kur)
 
 
@@ -99,6 +99,79 @@ def sonucu_denetle(sonuc: dict, beklenen_request_id: str) -> list[str]:
     return sorunlar
 
 
+def kuyruk_sayisi(kanal, ad: str) -> int:
+    """Kuyruktaki mesaj sayısı. passive=True: ilan etmez, sadece okur."""
+    return kanal.queue_declare(ad, durable=True, passive=True).method.message_count
+
+
+def hata_yollarini_dene(kanal) -> int:
+    """Bozuk mesajların DOĞRU yere gittiğini broker üzerinde kanıtlar.
+
+    Birim testler topolojinin doğru İLAN EDİLDİĞİNİ gösteriyor; burada
+    RabbitMQ'nun gerçekten öyle YÖNLENDİRDİĞİNİ gösteriyoruz. Aradaki fark
+    önemli: DLQ yanlış anahtarla bağlanmış olsaydı ilan yine başarılı olur,
+    mesajlar ise hata vermeden yok olurdu.
+
+    Sözleşme §8'in iki ayrı kuralı sınanıyor:
+      - ayrıştırılamayan mesaj -> DLQ, cevap YOK (request_id okunamıyor)
+      - ayrıştırılabilen ama hatalı mesaj -> DLQ DEĞİL, `status: error` cevabı
+    """
+    kanal.queue_purge(DLQ)
+    kanal.queue_purge(SONUC_KUYRUGU)
+    sorunlar = []
+
+    def yayinla(govde: bytes):
+        kanal.basic_publish(
+            exchange=EXCHANGE, routing_key=ISTEK_ANAHTARI, body=govde,
+            properties=pika.BasicProperties(content_type="application/json",
+                                            delivery_mode=2))
+
+    print("\n[1/2] Ayrıştırılamayan mesaj → DLQ'ya düşmeli, cevap olmamalı")
+    yayinla(b"{bu json degil")
+    time.sleep(3)
+    dlq, sonuc = kuyruk_sayisi(kanal, DLQ), kuyruk_sayisi(kanal, SONUC_KUYRUGU)
+    print(f"      DLQ={dlq} (beklenen 1)   sonuç={sonuc} (beklenen 0)")
+    if dlq != 1:
+        sorunlar.append("bozuk mesaj DLQ'ya düşmedi — DLQ bağı yanlış anahtarla "
+                        "kurulmuş olabilir, mesajlar sessizce kayboluyor")
+    if sonuc != 0:
+        sorunlar.append("ayrıştırılamayan mesaja cevap üretildi (request_id yokken)")
+
+    print("\n[2/2] Tanınmayan şema sürümü → DLQ'ya DÜŞMEMELİ, hata cevabı gelmeli")
+    yayinla(json.dumps({
+        "schema_version": SEMA_SURUMU + 98, "request_id": "test-hata-yolu",
+        "ad_id": 777, "ad_type": "LOST",
+        "photo_urls": ["https://ornek.test/a.jpg"], "candidates": [],
+    }).encode("utf-8"))
+    time.sleep(3)
+    dlq, sonuc = kuyruk_sayisi(kanal, DLQ), kuyruk_sayisi(kanal, SONUC_KUYRUGU)
+    print(f"      DLQ={dlq} (beklenen hâlâ 1)   sonuç={sonuc} (beklenen 1)")
+    if dlq != 1:
+        sorunlar.append("cevaplanabilir mesaj DLQ'ya düştü — sonsuz döngü riski")
+
+    method, _, govde = kanal.basic_get(SONUC_KUYRUGU, auto_ack=True)
+    if not method:
+        sorunlar.append("hata cevabı gelmedi — ilan sonsuza kadar PENDING kalır")
+    else:
+        cevap = json.loads(govde)
+        print(f"      cevap: status={cevap['status']} "
+              f"kod={cevap.get('error', {}).get('code')} ad_id={cevap['ad_id']}")
+        if cevap.get("error", {}).get("code") != "UNSUPPORTED_SCHEMA":
+            sorunlar.append(f"beklenen kod UNSUPPORTED_SCHEMA değil: {cevap}")
+        if cevap.get("ad_id") != 777:
+            sorunlar.append("ad_id geri dönmedi — Java hangi ilan olduğunu bilemez")
+
+    kanal.queue_purge(DLQ)
+    print()
+    if sorunlar:
+        print("✗ HATA YOLLARI BAŞARISIZ:")
+        for s in sorunlar:
+            print(f"    - {s}")
+        return 1
+    print("✓ Hata yolları doğru: bozuk mesaj DLQ'ya, hatalı mesaj cevaba gidiyor.")
+    return 0
+
+
 def main():
     ayristirici = argparse.ArgumentParser()
     ayristirici.add_argument("--url", action="append", default=[],
@@ -109,7 +182,18 @@ def main():
     ayristirici.add_argument("--bekle", type=float, default=120.0,
                              help="Sonuç için azami bekleme (saniye)")
     ayristirici.add_argument("--amqp", default=AMQP_URL)
+    ayristirici.add_argument("--hata-yollari", action="store_true",
+                             help="Mutlu yol yerine hata yollarını sına "
+                                  "(DLQ ve hata cevabı) — fotoğraf gerekmez")
     a = ayristirici.parse_args()
+
+    if a.hata_yollari:
+        baglanti = pika.BlockingConnection(pika.URLParameters(a.amqp))
+        kanal = baglanti.channel()
+        topolojiyi_kur(kanal)
+        kod = hata_yollarini_dene(kanal)
+        baglanti.close()
+        return kod
 
     sunucu = None
     urls = list(a.url)

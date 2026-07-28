@@ -92,6 +92,18 @@ venv\Scripts\python.exe scripts/sahte_java.py --dosya degerlendirme\test_resim.j
 Yerel dosya kullanılıyorsa `.env` içinde `PHOTO_ALLOWED_HOSTS=127.0.0.1`
 olmalı — SSRF koruması aksi hâlde kendi makinemizi de reddeder (bilerek).
 
+Hata yollarını sınamak için (fotoğraf gerekmez):
+
+```bash
+venv\Scripts\python.exe scripts/sahte_java.py --hata-yollari
+```
+
+Bu, bozuk bir mesajın gerçekten DLQ'ya düştüğünü ve tanınmayan şema sürümünün
+DLQ yerine `status: error` cevabı ürettiğini **broker üzerinde** doğrular.
+Birim testler topolojinin doğru ilan edildiğini gösterir; bu ise RabbitMQ'nun
+öyle yönlendirdiğini. DLQ yanlış anahtarla bağlanmış olsaydı ilan yine
+başarılı olur, mesajlar ise hata vermeden yok olurdu.
+
 ## Docker
 
 ```bash
