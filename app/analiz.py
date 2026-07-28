@@ -8,7 +8,7 @@ durur, sadece giriş kapısı değişir.
 import logging
 
 from .attributes import attribute_analyzer
-from .embedder import embedder
+from .embedder import kimlik_gomucu
 from .hatalar import GecersizGoruntu
 from .indirici import hepsini_indir
 from .surum import MODEL_SURUMU
@@ -28,14 +28,18 @@ def baytlari_analiz_et(fotograflar: list[bytes],
 
     for i, ham in enumerate(fotograflar):
         try:
-            emb = embedder.embed_bytes(ham)
+            emb = kimlik_gomucu.embed_bytes(ham)
         except GecersizGoruntu as e:
             logger.warning("Fotoğraf %d atlandı: %s", i, e)
             basarisizlar.append({"index": i, "error": str(e)})
             continue
         embeddings.append(emb)
         try:
-            oznitelikler.append(attribute_analyzer.analyze(ham, emb))
+            # Kimlik vektörü etiket analizine GEÇİRİLMEZ. Kimlik modeli CLIP'ten
+            # farklıysa vektör başka bir uzayda olur ve zero-shot metin
+            # karşılaştırması anlamsız sonuç verir — sessizce yanlış etiket üretir.
+            # attribute_analyzer kendi CLIP vektörünü hesaplasın.
+            oznitelikler.append(attribute_analyzer.analyze(ham))
         except Exception as e:
             # Öznitelik hatası embedding'i çöpe atmamalı: eşleştirme etiketsiz
             # de çalışır, sadece skorun etiket bileşeni sıfırlanır.

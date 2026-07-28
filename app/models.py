@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class AnalyzeResponse(BaseModel):
-    embedding: list[float]          # 512 boyutlu CLIP vektörü
+    embedding: list[float]          # kimlik vektörü (CLIP 512 / SigLIP2 768)
     labels: list[str]               # Eşleştirme skorunda kullanılan etiketler
     species: str                    # "cat" | "dog" | "unknown"
     species_confidence: float = 0.0
