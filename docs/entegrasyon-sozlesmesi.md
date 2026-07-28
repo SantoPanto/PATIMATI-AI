@@ -436,12 +436,12 @@ yazmaya gerek yok.
 2. **S3 kova alan adı ne?** `PHOTO_ALLOWED_HOSTS`'a yazılması gereken tam alan
    adı bilinmiyor. Bu gelmeden AI üretimde hiçbir fotoğrafı indiremez —
    beyaz listede olmayan adres reddedilir (§10).
-3. **Boş `PHOTO_ALLOWED_HOSTS` üretimde ne yapmalı?** Bugünkü davranış: liste
-   boşsa dış adres beyaz liste denetimine girmez (yerel adresler ve http yine
-   kapalı). Bu bilinçli bir tasarım kararı ve testi var
-   (`tests/test_indirici.py`). Ama üretimde bu değişkeni yazmayı unutmak,
-   korumanın açık olduğunu sanırken kapalı olması demek. Karar gerekiyor:
-   boş liste "her yere izin" mi kalsın, "hiçbir yere izin yok" mu olsun?
+3. ~~Boş `PHOTO_ALLOWED_HOSTS` ne yapmalı?~~ **Karara bağlandı (2026-07-29):
+   kapalıya düşer.** Liste boşsa hiçbir adres indirilmez; hata mesajı ne
+   yazılması gerektiğini söyler. Öncesinde boş liste dış adresleri serbest
+   bırakıyordu — değişkeni yazmayı unutan bir dağıtım, korumanın açık olduğunu
+   sanarak kapalı çalışırdı. ⚠️ **Dağıtımda bu değişken doldurulmalı**, yoksa
+   servis hiçbir fotoğrafı indiremez (§10).
 
 ---
 

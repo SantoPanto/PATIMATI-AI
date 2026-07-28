@@ -9,7 +9,7 @@ tek bir hatalı kayıt yeter.
 
 Korumalar:
   - şema kısıtı (varsayılan yalnızca https)
-  - alan adı beyaz listesi (PHOTO_ALLOWED_HOSTS)
+  - alan adı beyaz listesi (PHOTO_ALLOWED_HOSTS) — **boşsa hiçbir şey inmez**
   - özel/yerel IP engeli (10.x, 192.168.x, 127.x, 169.254.x, ::1 ...)
   - yönlendirme takip edilmez (her sıçrama yeniden doğrulanamayacağı için)
   - indirme sırasında boyut sınırı (Content-Length'e güvenilmez)
@@ -101,7 +101,24 @@ def dogrula(url: str) -> None:
         raise FotografIndirilemedi(
             f"Desteklenmeyen şema: {p.scheme or '(yok)'} (izinli: https)")
 
-    if IZINLI_HOSTLAR and not acik_izinli:
+    # Liste boşsa HİÇBİR ŞEY indirilmez (kapalıya düşer).
+    #
+    # Eskiden boş liste "dış adresleri serbest bırak" anlamına geliyordu ve bu
+    # bilinçli bir tercihti (lokalde rastgele bir fotoğraf adresiyle deneme
+    # yapmak kolay olsun diye). Değiştirildi çünkü sessizce yanlış tarafa
+    # düşüyordu: değişkeni yazmayı unutan bir dağıtım, korumanın AÇIK olduğunu
+    # sanarak kapalı çalışıyordu. Bir güvenlik denetiminin varsayılanı,
+    # unutulduğunda güvenli olan taraf olmalı.
+    #
+    # Geliştirmeye maliyeti düşük: yerel deneme için zaten `127.0.0.1`
+    # yazılması gerekiyordu (bkz. scripts/sahte_java.py).
+    if not IZINLI_HOSTLAR:
+        raise FotografIndirilemedi(
+            "PHOTO_ALLOWED_HOSTS boş — hiçbir adres indirilemez. "
+            ".env dosyasına indirilmesine izin verilen alan adlarını yazın "
+            "(yerel deneme için 127.0.0.1, üretimde S3 alan adınız).")
+
+    if not acik_izinli:
         raise FotografIndirilemedi(f"Alan adı beyaz listede değil: {p.hostname}")
 
     _ip_denetle(p.hostname, acik_izinli)

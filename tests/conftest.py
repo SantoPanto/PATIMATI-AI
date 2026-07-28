@@ -27,6 +27,17 @@ import os
 
 os.environ.setdefault("KIMLIK_MODEL", "clip")
 
+# Aynı sıra bağımlılığı beyaz listede de var: `app/indirici.py`
+# PHOTO_ALLOWED_HOSTS'u içe aktarma anında okuyor. Geliştiricinin .env
+# dosyasında bu değişken doluysa (yerel deneme için 127.0.0.1 yazmış olabilir)
+# ve load_dotenv testlerden önce çalışırsa, "yerel adresler reddedilir" testi
+# KIRILIR — reddedilmesi beklenen adres izinli hâle gelir.
+#
+# Sessiz bir hata değil, gürültülü bir hata; ama yanlış yeri işaret ediyor:
+# kırılan şey kod değil, geliştiricinin makinesindeki ayar. Testin ne sınadığı
+# makineden makineye değişmemeli, o yüzden boşta sabitliyoruz.
+os.environ.setdefault("PHOTO_ALLOWED_HOSTS", "")
+
 
 def pytest_report_header(config):
     """Hangi yapılandırmanın sınandığını çıktının başına yazar.
