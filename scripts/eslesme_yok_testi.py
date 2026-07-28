@@ -41,8 +41,6 @@ def main():
     galeri_vektorleri = vektorler[galeri_idx]
     
     yabanci_sorgu_vektorleri = vektorler[sorgu_idx]
-    yabanci_sorgu_kimlikleri = kimlikler[sorgu_idx]
-    
     print(f"\nSistemdeki (Galerideki) Hayvan Sayısı: {len(kayitli_kimlikler)} (Toplam {len(galeri_idx)} fotoğraf)")
     print(f"Sisteme Yabancı (Eşi Olmayan) Hayvan Sayısı: {len(essiz_kimlikler) - len(kayitli_kimlikler)} (Toplam {len(sorgu_idx)} fotoğraf)")
     
