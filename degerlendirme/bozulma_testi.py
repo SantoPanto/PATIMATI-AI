@@ -21,8 +21,13 @@ def main():
     # sessizce çökmesini engellemek için yedek plan olan google-siglip2'yi yüklüyoruz.
     print("1. Yeni Şampiyon Model Yükleniyor: google-siglip2...")
     gomucu = gomucu_kur("google-siglip2")
-    islemci = gomucu._islemci
-    model = gomucu._model.to("cuda" if torch.cuda.is_available() else "cpu")
+    islemci = getattr(gomucu, "_islemci", None)
+    model = getattr(gomucu, "_model", None)
+    if islemci is None or model is None:
+        raise TypeError(f"Beklenen HF gömücü bulunamadı: {type(gomucu).__name__} (google-siglip2 hf olmalı).")
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = model.to(device)
     model.eval()
 
     def resmi_vektore_cevir(img):
