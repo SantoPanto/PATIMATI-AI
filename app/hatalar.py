@@ -32,6 +32,17 @@ class DesteklenmeyenSema(AIHatasi):
     KOD = "UNSUPPORTED_SCHEMA"
 
 
+class GecersizIstek(AIHatasi):
+    """Mesaj geçerli JSON ama sözleşmedeki alanları taşımıyor.
+
+    Neden INTERNAL değil: INTERNAL "bizde bir şey patladı" demektir ve hatayı
+    ayıklayan kişiyi AI servisinin içinde arama yapmaya yönlendirir. Oysa eksik
+    `ad_id`, gönderen taraftaki bir hatadır. Yanlış hata kodu, yanlış yerde
+    saatler harcatır.
+    """
+    KOD = "INVALID_REQUEST"
+
+
 class ModelHatasi(AIHatasi):
     """Model çalışırken hata verdi."""
     KOD = "MODEL_ERROR"

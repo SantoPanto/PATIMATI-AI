@@ -108,12 +108,39 @@ def test_beyaz_listede_nokta_alt_alan_adlarini_kapsar(monkeypatch):
 
 
 def test_bos_liste_hicbir_seyi_acikca_izinli_yapmaz(monkeypatch):
-    """Liste boşken dış adresler indirilebilir ama hiçbiri 'açıkça izinli'
-    sayılmaz — yani yerel adresler ve http yine kapalı kalır."""
+    """Liste boşken hiçbir adres 'açıkça izinli' sayılmaz."""
     monkeypatch.setattr(indirici, "IZINLI_HOSTLAR", [])
     assert not indirici._acikca_izinli("herhangi-bir-site.com")
     with pytest.raises(FotografIndirilemedi):
         indirici.dogrula("https://127.0.0.1/a.jpg")
+
+
+def test_bos_liste_dis_adresleri_de_reddeder(monkeypatch):
+    """Beyaz liste boşsa HİÇBİR adres inmez — koruma kapalıya düşer.
+
+    Bu davranış 2026-07-29'da değişti. Öncesinde boş liste "dış adresleri
+    serbest bırak" demekti ve bu bilinçli bir tercihti (lokalde rastgele bir
+    fotoğraf adresiyle deneme kolay olsun diye). Sorun şuydu: değişkeni yazmayı
+    unutan bir dağıtım, korumanın AÇIK olduğunu sanarak kapalı çalışıyordu.
+
+    Daha kötüsü, o davranışı koruyan hiçbir test YOKTU — yalnızca bir docstring
+    iddia ediyordu. Yani davranış iki yönde de testsizdi ve sessizce
+    değiştirilebilirdi. Bu test o boşluğu kapatıyor.
+    """
+    monkeypatch.setattr(indirici, "IZINLI_HOSTLAR", [])
+    with pytest.raises(FotografIndirilemedi, match="PHOTO_ALLOWED_HOSTS"):
+        indirici.dogrula("https://example.com/a.jpg")
+
+
+def test_liste_doluyken_listede_olmayan_alan_adi_reddedilir(monkeypatch):
+    """Liste doluyken denetim eskisi gibi çalışmaya devam etmeli.
+
+    (Adres DNS'e gitmeden reddedilir — bu dosyadaki testler ağa çıkmaz.)
+    """
+    monkeypatch.setattr(indirici, "IZINLI_HOSTLAR",
+                        ["patimati-media.s3.eu-central-1.amazonaws.com"])
+    with pytest.raises(FotografIndirilemedi, match="beyaz listede değil"):
+        indirici.dogrula("https://kotu-site.com/a.jpg")
 
 
 # --------------------------------------------------------------------------

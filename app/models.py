@@ -50,6 +50,31 @@ class MatchRequest(BaseModel):
     ad_id: int | None = None
 
 
+class KuyrukIstegi(BaseModel):
+    """`ai.analysis.request` kuyruğundan gelen mesaj (sözleşme §3).
+
+    Doğrulamada bilinçli olarak GEVŞEK davranıyoruz — "gönderene sıkı, alana
+    hoşgörülü" kuralı (bkz. matcher.py'deki tür karşılaştırması notu):
+
+    - `photo_urls` boş gelebilir: sözleşme bunun karşılığını Pydantic hatası
+      değil, `NO_PHOTOS` hata kodu olarak tanımlıyor. Doğrulamada zorlarsak
+      Java'ya anlamsız bir "INVALID_REQUEST" döner.
+    - `photo_urls` 5'ten uzun gelebilir: indirici fazlasını kırpıp günlüğe
+      yazıyor (`app/indirici.py: AZAMI_FOTOGRAF`). Mesajı tümden düşürmek,
+      işlenebilecek 5 fotoğrafı da çöpe atmak olurdu.
+    - `ad_type` sözleşmede zorunlu ama AI tarafında KULLANILMIYOR (adayları
+      Java süzüyor, §5). Kullanmadığımız bir alan yüzünden analizi düşürmek
+      kötü takas; varsayılanı var.
+    """
+    schema_version: int
+    request_id: str
+    ad_id: int
+    ad_type: str = "LOST"
+    declared_species: str | None = None
+    photo_urls: list[str] = Field(default_factory=list)
+    candidates: list[MatchCandidate] = Field(default_factory=list)
+
+
 class MatchResult(BaseModel):
     ad_id: int
     score: float

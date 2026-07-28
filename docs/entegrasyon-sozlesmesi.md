@@ -1,6 +1,11 @@
 # AI Servisi ↔ Backend Entegrasyon Sözleşmesi
 
-**Sürüm:** 1 · **Durum:** taslak, ekip onayı bekliyor · **Son güncelleme:** 2026-07-26
+**Sürüm:** 1 · **Durum:** Python ayağı çalışıyor ve broker üzerinde doğrulandı;
+açık soruların 4'ü karara bağlandı (§11) · **Son güncelleme:** 2026-07-28
+
+> `schema_version` hâlâ **1**: verilen kararların hiçbiri mesaj biçimini
+> değiştirmedi, yalnızca kuralları netleştirdi. Java tarafı bu belgeye göre
+> yazılabilir.
 
 Bu belge, Java backend ile Python AI servisinin birbirine ne göndereceğini tanımlar.
 İki taraf ayrı repolarda ve ayrı dillerde olduğu için derleyici bizi korumuyor —
@@ -52,6 +57,22 @@ AI çağrısı **asenkrondur**: kullanıcı ilan verirken beklemez. Fotoğraf an
 - **Python** → `ai.analysis.request` kuyruğunu dinler,
   `patimati.ai` exchange'ine `analysis.result` anahtarıyla yayınlar.
 - Mesaj gövdesi **UTF-8 JSON**, `content_type: application/json`.
+- Sonuç mesajları **kalıcı** yayınlanır (`delivery_mode=2`). Kuyruk `durable`
+  olsa bile mesaj kalıcı değilse broker yeniden başladığında sonuç kaybolur ve
+  ilan sonsuza kadar `PENDING` kalır — ikisi birlikte gerekir.
+
+> ⚠️ **İki taraf da aynı nesneleri ilan edecek — argümanlar BİREBİR aynı olmalı.**
+> Aynı kuyruğu farklı argümanlarla ilan etmek `PRECONDITION_FAILED` verir ve
+> kanalı kapatır. Özellikle `ai.analysis.request` iki tarafta da
+> `x-dead-letter-exchange: patimati.ai.dlx` argümanıyla ilan edilmelidir.
+> Spring AMQP'de bu `QueueBuilder.durable("ai.analysis.request").deadLetterExchange("patimati.ai.dlx").build()` demektir.
+>
+> Ölü mektup kuyruğu (`ai.analysis.request.dlq`), DLX'e **kuyruk adıyla değil
+> `analysis.request` anahtarıyla** bağlanır: RabbitMQ mesajı ölü mektuba
+> düşürürken orijinal yönlendirme anahtarını korur. Yanlış bağlanırsa mesajlar
+> hata vermeden yok olur.
+>
+> Referans uygulama Python tarafında: `app/kuyruk.py: topolojiyi_kur()`.
 
 ---
 
@@ -202,8 +223,22 @@ Java bu durumda `ai_status = FAILED` yazar; ilan normal şekilde yayında kalır
 | `PHOTO_DOWNLOAD_FAILED` | Adres indirilemedi (404, zaman aşımı, çok büyük dosya) |
 | `INVALID_IMAGE` | İndirildi ama görüntü olarak açılamadı |
 | `UNSUPPORTED_SCHEMA` | `schema_version` tanınmıyor |
+| `INVALID_REQUEST` | Mesaj geçerli JSON ama sözleşmedeki alanları taşımıyor (eksik `ad_id`, yanlış tip...). **Gönderen taraftaki hatadır.** |
 | `MODEL_ERROR` | Model çalışırken hata verdi |
 | `INTERNAL` | Beklenmeyen hata |
+
+> `INVALID_REQUEST` neden `INTERNAL`den ayrıldı: `INTERNAL` "AI servisinde bir
+> şey patladı" demektir ve hatayı arayan kişiyi yanlış repoda arama yapmaya
+> gönderir. Eksik bir alan gönderen taraftaki hatadır; kodun bunu söylemesi
+> saatler kazandırır. (Kod eklemek kırıcı değildir, bkz. §9.)
+
+**Hata mesajında da `request_id` ve `ad_id` döner** — mesaj şemaya hiç uymasa
+bile, okunabildiği kadarıyla. Dönmezse Java hangi ilanın başarısız olduğunu
+bilemez ve o ilan sonsuza kadar `PENDING` kalır.
+
+Başarılı sonuçta ayrıca `failed_photos` alanı gelir (sözleşmeye sonradan
+eklendi, kırıcı değil): indirilemeyen fotoğrafların adresi ve sebebi. Kullanıcı
+3 fotoğraf yükleyip 1'iyle analiz edildiyse bunun bir izi kalsın diye.
 
 ---
 
@@ -343,9 +378,22 @@ yazmaya gerek yok.
 
 - AI servisi **iç ağda** kalmalı, internete açık olmamalıdır. Zorunlu olarak
   açılacaksa paylaşılan bir gizli anahtar başlığı istenir.
-- S3 fotoğrafları için **süreli özel adres (presigned URL)** önerilir; böylece
-  AWS anahtarı AI servisine hiç girmez. Süre en az 10 dakika olmalı (kuyruk
-  gecikmesi payı).
+- **S3 fotoğrafları public URL ile sunulacak** (karar: Fatih, 2026-07-28).
+  Gerekçe: ilan görselleri herkese hızlıca açılabilmeli. AI servisi hiçbir
+  token, yetkilendirme başlığı ya da imzalı adres parametresiyle uğraşmaz;
+  düz adresten indirir. Presigned adres seçilseydi süresinin en az 10 dakika
+  olması gerekirdi (kuyruk gecikmesi payı) — public olduğu için bu kısıt düştü,
+  gecikmiş bir mesaj artık süresi dolmuş adres yüzünden başarısız olmaz.
+
+  > İki sonucu bilerek kabul ediyoruz:
+  > 1. Adresi bilen herkes fotoğrafa erişir ve adres **ilan silinse bile
+  >    çalışmaya devam eder** — nesne S3'ten ayrıca silinmedikçe. İlan silme
+  >    akışı S3 nesnesini de silmeli, yoksa "sildim" diyen kullanıcının
+  >    fotoğrafı ortada kalır.
+  > 2. Public olması beyaz listeyi GEREKSİZ KILMAZ. Beyaz liste, adresi
+  >    verenin (kuyruk mesajının) bizi başka bir yere yönlendirmesini
+  >    engellemek içindir; fotoğrafın kendisinin gizli olup olmamasıyla
+  >    ilgisi yoktur.
 - **Fotoğraf adresleri beyaz listeye alınmalıdır** (`PHOTO_ALLOWED_HOSTS`).
   AI servisi kendisine verilen adresi indirdiği için, korunmazsa iç ağ
   adreslerine istek attırılabilir (SSRF). Uygulanan korumalar:
@@ -359,15 +407,41 @@ yazmaya gerek yok.
 
 ---
 
-## 11. Açık sorular (ekip kararı bekliyor)
+## 11. Kararlar ve kalan sorular
 
-1. **Eşleşme bildirimi kime gidiyor?** Yeni ilanın sahibine mi, eşleşen eski
-   ilanın sahibine mi, ikisine birden mi?
-2. **Eşleşme sonrası akış nedir?** Kullanıcı onaylarsa ilan kapanıyor mu?
-3. **Eşleşme yarıçapı 25 km uygun mu?** Bildirim yarıçapından farklı olması
-   kabul ediliyor mu?
-4. **S3 adresleri public mi, presigned mi olacak?**
-5. **RabbitMQ'yu kim ayağa kaldırıyor** (lokal + dağıtım ortamı)?
+### Verilen kararlar (Fatih, 2026-07-28)
+
+| Soru | Karar | AI tarafına etkisi |
+|---|---|---|
+| Eşleşme bildirimi kime gider? | İlanın sahibine | Yok — bildirimi Java gönderiyor, AI yalnızca sıralı liste üretiyor |
+| Onaylayınca ilan kapanır mı? | **Hayır.** İlanı kapatmak ilan sahibinin elle yapacağı ayrı bir iştir | Yok, ama aşağıdaki nota bak |
+| Eşleşme yarıçapı 25 km | Uygun | Yok — süzme Java'da (§5) |
+| S3 adresleri | **Public URL** | Kimlik doğrulama kodu gerekmiyor; beyaz liste yine şart (§10) |
+| RabbitMQ'yu dağıtım ortamında kim kurar? | **Zahid** | Lokal taraf çözüldü (zip'ten, yönetici yetkisi gerekmeden — bkz. README). Dağıtımda kuyruk adlarının ve argümanlarının §2'deki gibi olması şart |
+
+> ⚠️ **"Onay ilanı kapatmıyor" kararının bir sonucu var.** İlan aktif kaldığı
+> için aday havuzunda kalmaya devam eder. Aynı ilan yeniden analiz edilirse
+> (fotoğraf değişikliği ya da model sürümü yükseltmesi sonrası toplu yeniden
+> analiz) aynı çift yeniden eşleşir ve bildirim TEKRAR gider. §7 kural 4 zaten
+> "bildirim tekrarı önlenmelidir" diyor; bunun karşılığı Java tarafında
+> "bu ilan çifti için bildirim gönderildi" kaydıdır. AI tarafı bunu bilemez —
+> saf bir fonksiyon, geçmişi yok.
+
+### Hâlâ açık
+
+1. **Bildirim hangi ilanın sahibine gidiyor?** Cevap "ilanın sahibine" idi ama
+   bir eşleşmede İKİ ilan var: yeni verilen ve eşleşen eski ilan. Kaybettiği
+   hayvanı arayan da, bulduğu hayvanı bildiren de haber almak ister — bu
+   yüzden büyük ihtimalle cevap "ikisine de", ama netleşmeli.
+2. **S3 kova alan adı ne?** `PHOTO_ALLOWED_HOSTS`'a yazılması gereken tam alan
+   adı bilinmiyor. Bu gelmeden AI üretimde hiçbir fotoğrafı indiremez —
+   beyaz listede olmayan adres reddedilir (§10).
+3. ~~Boş `PHOTO_ALLOWED_HOSTS` ne yapmalı?~~ **Karara bağlandı (2026-07-29):
+   kapalıya düşer.** Liste boşsa hiçbir adres indirilmez; hata mesajı ne
+   yazılması gerektiğini söyler. Öncesinde boş liste dış adresleri serbest
+   bırakıyordu — değişkeni yazmayı unutan bir dağıtım, korumanın açık olduğunu
+   sanarak kapalı çalışırdı. ⚠️ **Dağıtımda bu değişken doldurulmalı**, yoksa
+   servis hiçbir fotoğrafı indiremez (§10).
 
 ---
 
@@ -383,8 +457,8 @@ yazmaya gerek yok.
 | Python AI — URL'den indirme + çoklu fotoğraf | ✅ `POST /analyze_url` — kuyruk akışıyla aynı kodu çağırır, RabbitMQ olmadan da denenebilir |
 | Python AI — SSRF koruması | ✅ Beyaz liste, yerel ağ engeli, bağlantı-yerel mutlak yasak, yönlendirme yok, boyut/zaman sınırı |
 | Python AI — cins (`breed`) | ✅ Yapıldı — 37 ırk zero-shot; top-1 %78, güven eşiği 0.70 üstünde %90 (ölçüm: `scripts/measure_breed.py`) |
-| Python AI — URL'den indirme | ⬜ Yapılacak |
-| Python AI — RabbitMQ tüketici/üretici | ⬜ Yapılacak |
+| Python AI — RabbitMQ tüketici/üretici | ✅ `app/kuyruk.py` — topoloji, tüketici, üretici, DLQ, yeniden bağlanma. Ayrı süreç: `python -m app.kuyruk`. 21 test broker olmadan koşuyor (`tests/test_kuyruk.py`) |
+| Python AI — uçtan uca kanıt | ✅ **Gerçek broker üzerinde koşturuldu** (2026-07-28, RabbitMQ 4.3.4 + Erlang 27.3.4.13). `scripts/sahte_java.py` Java'nın yerine geçip istek yayınladı, sonuç 2,4 sn'de döndü ve sözleşme denetimini geçti — **`siglip2-animal/v2`, 768 boyutlu vektör**, yani bu belgedeki boyutla birebir. `--hata-yollari` kipiyle DLQ ve hata cevabı da doğrulandı |
 | Java — `Ad.photoUrls` | ⬜ KISIM 2'de |
 | Java — `ai_*` alanları | ⬜ AI sorumlusunda |
 | Java — kuyruk config + publisher + listener | ⬜ AI sorumlusunda |
