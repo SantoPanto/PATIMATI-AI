@@ -26,9 +26,11 @@ def main():
     
     # 2. VERİYİ "GALERİ" VE "YABANCI SORGULAR" OLARAK İKİYE BÖLME
     essiz_kimlikler = np.unique(kimlikler)
+    if len(essiz_kimlikler) < 2:
+        print(f"HATA: Open-set testi için en az 2 farklı kimlik gerekir (bulunan: {len(essiz_kimlikler)}).")
+        return
     np.random.seed(42)
     np.random.shuffle(essiz_kimlikler)
-    
     # Hayvanların yarısı veri tabanında (Galeri) var, yarısı ise tamamen YABANCI
     yari_nokta = len(essiz_kimlikler) // 2
     kayitli_kimlikler = set(essiz_kimlikler[:yari_nokta])
