@@ -14,8 +14,9 @@ def main():
     # DogFaceNet yerine CatIndividualImages kullanıyoruz
     df = veri_yukle("CatIndividualImages", ROOT / "data" / "CatIndividualImages", birey_sayisi=100, foto_sayisi=3, tohum=42)
     
-    print("\nŞampiyon Model Yükleniyor: avito-siglip2...")
-    gomucu = gomucu_kur("google-siglip2")
+    model_anahtari = "google-siglip2"
+    print(f"\nŞampiyon Model Yükleniyor: {model_anahtari}...")
+    gomucu = gomucu_kur(model_anahtari)
     
     yollar = df["tam_yol"].tolist()
     kimlikler = np.array(df["identity"].tolist())
