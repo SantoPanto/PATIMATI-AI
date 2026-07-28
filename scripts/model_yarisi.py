@@ -154,8 +154,57 @@ class HFGomucu(Gomucu):
         # Ön işleme kaynağı ağırlıklardan farklı olabilir (bkz. ADAYLAR notu)
         self._islemci = AutoProcessor.from_pretrained(islemci or kimlik)
         self._model, bilgi = AutoModel.from_pretrained(kimlik, output_loading_info=True)
-        self._agirliklari_dogrula(kimlik, bilgi)
+
+        # Ağırlıklar tutmadıysa önek sorunu olabilir — onarmayı dene, olmuyorsa çök.
+        if bilgi.get("missing_keys") or bilgi.get("mismatched_keys"):
+            onarilmis = self._onekli_agirliklari_onar(kimlik)
+            if onarilmis is None:
+                self._agirliklari_dogrula(kimlik, bilgi)   # tanıdık değil → hata fırlatır
+            self._model = onarilmis
         self._model.eval()
+
+    @staticmethod
+    def _onekli_agirliklari_onar(kimlik):
+        """Tüm anahtarları ortak bir önek taşıyan checkpoint'i yükleyebilir hâle getirir.
+
+        AvitoTech'in SigLIP2 deposunda 408 anahtarın hepsi `clip.` önekli ve
+        `text_config.vocab_size` eksik. transformers yalnızca hedef sınıfın kendi
+        önekini soyduğu için (SiglipModel'de `siglip`) hiçbir anahtar tutmuyor ve
+        model RASTGELE ağırlıkla yükleniyor.
+
+        Bunu daha önce elle düzeltip yerel klasöre koymuştuk — ama o klasör depoda
+        olmadığı için ekipten kimse modeli kullanamıyordu (Yusuf PR #6'da bildirdi).
+        Artık onarım kodda: önek soyuluyor, eksik vocab_size çıkarılıyor.
+        """
+        import torch
+        from huggingface_hub import hf_hub_download
+        from safetensors.torch import load_file
+        from transformers import AutoConfig, AutoModel
+
+        yol = Path(kimlik)
+        dosya = (yol / "model.safetensors") if yol.exists() else Path(
+            hf_hub_download(kimlik, "model.safetensors"))
+        sd = load_file(str(dosya))
+
+        onek = "clip."
+        if not all(k.startswith(onek) for k in sd):
+            return None                      # tanıdık bir onarım değil
+        sd = {k[len(onek):]: v for k, v in sd.items()}
+
+        cfg = AutoConfig.from_pretrained(kimlik)
+        # Metin kulesinin sözlük boyutu config'te yoksa varsayılan (32000) kullanılır
+        # ama checkpoint 256000 taşıyor; boyutu ağırlıktan okuyup düzeltiyoruz.
+        gomme = sd.get("text_model.embeddings.token_embedding.weight")
+        if gomme is not None and hasattr(cfg, "text_config"):
+            cfg.text_config.vocab_size = gomme.shape[0]
+
+        model = AutoModel.from_config(cfg)
+        eksik, fazla = model.load_state_dict(sd, strict=False)
+        if eksik:
+            raise RuntimeError(f"{kimlik}: onarımdan sonra da {len(eksik)} anahtar eksik")
+        print(f"    (ağırlıklar onarıldı: '{onek}' öneki soyuldu, "
+              f"vocab_size={getattr(cfg.text_config, 'vocab_size', '?')})")
+        return model
 
     @staticmethod
     def _agirliklari_dogrula(kimlik, bilgi):
