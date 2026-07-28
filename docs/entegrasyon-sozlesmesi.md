@@ -1,6 +1,11 @@
 # AI Servisi ↔ Backend Entegrasyon Sözleşmesi
 
-**Sürüm:** 1 · **Durum:** taslak, ekip onayı bekliyor · **Son güncelleme:** 2026-07-26
+**Sürüm:** 1 · **Durum:** Python ayağı çalışıyor ve broker üzerinde doğrulandı;
+açık soruların 4'ü karara bağlandı (§11) · **Son güncelleme:** 2026-07-28
+
+> `schema_version` hâlâ **1**: verilen kararların hiçbiri mesaj biçimini
+> değiştirmedi, yalnızca kuralları netleştirdi. Java tarafı bu belgeye göre
+> yazılabilir.
 
 Bu belge, Java backend ile Python AI servisinin birbirine ne göndereceğini tanımlar.
 İki taraf ayrı repolarda ve ayrı dillerde olduğu için derleyici bizi korumuyor —
@@ -373,9 +378,22 @@ yazmaya gerek yok.
 
 - AI servisi **iç ağda** kalmalı, internete açık olmamalıdır. Zorunlu olarak
   açılacaksa paylaşılan bir gizli anahtar başlığı istenir.
-- S3 fotoğrafları için **süreli özel adres (presigned URL)** önerilir; böylece
-  AWS anahtarı AI servisine hiç girmez. Süre en az 10 dakika olmalı (kuyruk
-  gecikmesi payı).
+- **S3 fotoğrafları public URL ile sunulacak** (karar: Fatih, 2026-07-28).
+  Gerekçe: ilan görselleri herkese hızlıca açılabilmeli. AI servisi hiçbir
+  token, yetkilendirme başlığı ya da imzalı adres parametresiyle uğraşmaz;
+  düz adresten indirir. Presigned adres seçilseydi süresinin en az 10 dakika
+  olması gerekirdi (kuyruk gecikmesi payı) — public olduğu için bu kısıt düştü,
+  gecikmiş bir mesaj artık süresi dolmuş adres yüzünden başarısız olmaz.
+
+  > İki sonucu bilerek kabul ediyoruz:
+  > 1. Adresi bilen herkes fotoğrafa erişir ve adres **ilan silinse bile
+  >    çalışmaya devam eder** — nesne S3'ten ayrıca silinmedikçe. İlan silme
+  >    akışı S3 nesnesini de silmeli, yoksa "sildim" diyen kullanıcının
+  >    fotoğrafı ortada kalır.
+  > 2. Public olması beyaz listeyi GEREKSİZ KILMAZ. Beyaz liste, adresi
+  >    verenin (kuyruk mesajının) bizi başka bir yere yönlendirmesini
+  >    engellemek içindir; fotoğrafın kendisinin gizli olup olmamasıyla
+  >    ilgisi yoktur.
 - **Fotoğraf adresleri beyaz listeye alınmalıdır** (`PHOTO_ALLOWED_HOSTS`).
   AI servisi kendisine verilen adresi indirdiği için, korunmazsa iç ağ
   adreslerine istek attırılabilir (SSRF). Uygulanan korumalar:
@@ -389,15 +407,37 @@ yazmaya gerek yok.
 
 ---
 
-## 11. Açık sorular (ekip kararı bekliyor)
+## 11. Kararlar ve kalan sorular
 
-1. **Eşleşme bildirimi kime gidiyor?** Yeni ilanın sahibine mi, eşleşen eski
-   ilanın sahibine mi, ikisine birden mi?
-2. **Eşleşme sonrası akış nedir?** Kullanıcı onaylarsa ilan kapanıyor mu?
-3. **Eşleşme yarıçapı 25 km uygun mu?** Bildirim yarıçapından farklı olması
-   kabul ediliyor mu?
-4. **S3 adresleri public mi, presigned mi olacak?**
-5. **RabbitMQ'yu kim ayağa kaldırıyor** (lokal + dağıtım ortamı)?
+### Verilen kararlar (Fatih, 2026-07-28)
+
+| Soru | Karar | AI tarafına etkisi |
+|---|---|---|
+| Eşleşme bildirimi kime gider? | İlanın sahibine | Yok — bildirimi Java gönderiyor, AI yalnızca sıralı liste üretiyor |
+| Onaylayınca ilan kapanır mı? | **Hayır.** İlanı kapatmak ilan sahibinin elle yapacağı ayrı bir iştir | Yok, ama aşağıdaki nota bak |
+| Eşleşme yarıçapı 25 km | Uygun | Yok — süzme Java'da (§5) |
+| S3 adresleri | **Public URL** | Kimlik doğrulama kodu gerekmiyor; beyaz liste yine şart (§10) |
+
+> ⚠️ **"Onay ilanı kapatmıyor" kararının bir sonucu var.** İlan aktif kaldığı
+> için aday havuzunda kalmaya devam eder. Aynı ilan yeniden analiz edilirse
+> (fotoğraf değişikliği ya da model sürümü yükseltmesi sonrası toplu yeniden
+> analiz) aynı çift yeniden eşleşir ve bildirim TEKRAR gider. §7 kural 4 zaten
+> "bildirim tekrarı önlenmelidir" diyor; bunun karşılığı Java tarafında
+> "bu ilan çifti için bildirim gönderildi" kaydıdır. AI tarafı bunu bilemez —
+> saf bir fonksiyon, geçmişi yok.
+
+### Hâlâ açık
+
+1. **Bildirim hangi ilanın sahibine gidiyor?** Cevap "ilanın sahibine" idi ama
+   bir eşleşmede İKİ ilan var: yeni verilen ve eşleşen eski ilan. Kaybettiği
+   hayvanı arayan da, bulduğu hayvanı bildiren de haber almak ister — bu
+   yüzden büyük ihtimalle cevap "ikisine de", ama netleşmeli.
+2. **S3 kova alan adı ne?** `PHOTO_ALLOWED_HOSTS`'a yazılması gereken tam alan
+   adı bilinmiyor. Bu gelmeden AI üretimde hiçbir fotoğrafı indiremez —
+   beyaz listede olmayan adres reddedilir (§10).
+3. **RabbitMQ'yu dağıtım ortamında kim ayağa kaldırıyor?** Lokal taraf çözüldü
+   (zip'ten, yönetici yetkisi ve Windows servisi gerekmeden — bkz. README),
+   dağıtım ortamı hâlâ açık.
 
 ---
 
