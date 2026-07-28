@@ -417,6 +417,7 @@ yazmaya gerek yok.
 | Onaylayınca ilan kapanır mı? | **Hayır.** İlanı kapatmak ilan sahibinin elle yapacağı ayrı bir iştir | Yok, ama aşağıdaki nota bak |
 | Eşleşme yarıçapı 25 km | Uygun | Yok — süzme Java'da (§5) |
 | S3 adresleri | **Public URL** | Kimlik doğrulama kodu gerekmiyor; beyaz liste yine şart (§10) |
+| RabbitMQ'yu dağıtım ortamında kim kurar? | **Zahid** | Lokal taraf çözüldü (zip'ten, yönetici yetkisi gerekmeden — bkz. README). Dağıtımda kuyruk adlarının ve argümanlarının §2'deki gibi olması şart |
 
 > ⚠️ **"Onay ilanı kapatmıyor" kararının bir sonucu var.** İlan aktif kaldığı
 > için aday havuzunda kalmaya devam eder. Aynı ilan yeniden analiz edilirse
@@ -435,9 +436,12 @@ yazmaya gerek yok.
 2. **S3 kova alan adı ne?** `PHOTO_ALLOWED_HOSTS`'a yazılması gereken tam alan
    adı bilinmiyor. Bu gelmeden AI üretimde hiçbir fotoğrafı indiremez —
    beyaz listede olmayan adres reddedilir (§10).
-3. **RabbitMQ'yu dağıtım ortamında kim ayağa kaldırıyor?** Lokal taraf çözüldü
-   (zip'ten, yönetici yetkisi ve Windows servisi gerekmeden — bkz. README),
-   dağıtım ortamı hâlâ açık.
+3. **Boş `PHOTO_ALLOWED_HOSTS` üretimde ne yapmalı?** Bugünkü davranış: liste
+   boşsa dış adres beyaz liste denetimine girmez (yerel adresler ve http yine
+   kapalı). Bu bilinçli bir tasarım kararı ve testi var
+   (`tests/test_indirici.py`). Ama üretimde bu değişkeni yazmayı unutmak,
+   korumanın açık olduğunu sanırken kapalı olması demek. Karar gerekiyor:
+   boş liste "her yere izin" mi kalsın, "hiçbir yere izin yok" mu olsun?
 
 ---
 
