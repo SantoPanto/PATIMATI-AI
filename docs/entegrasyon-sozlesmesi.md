@@ -52,6 +52,22 @@ AI çağrısı **asenkrondur**: kullanıcı ilan verirken beklemez. Fotoğraf an
 - **Python** → `ai.analysis.request` kuyruğunu dinler,
   `patimati.ai` exchange'ine `analysis.result` anahtarıyla yayınlar.
 - Mesaj gövdesi **UTF-8 JSON**, `content_type: application/json`.
+- Sonuç mesajları **kalıcı** yayınlanır (`delivery_mode=2`). Kuyruk `durable`
+  olsa bile mesaj kalıcı değilse broker yeniden başladığında sonuç kaybolur ve
+  ilan sonsuza kadar `PENDING` kalır — ikisi birlikte gerekir.
+
+> ⚠️ **İki taraf da aynı nesneleri ilan edecek — argümanlar BİREBİR aynı olmalı.**
+> Aynı kuyruğu farklı argümanlarla ilan etmek `PRECONDITION_FAILED` verir ve
+> kanalı kapatır. Özellikle `ai.analysis.request` iki tarafta da
+> `x-dead-letter-exchange: patimati.ai.dlx` argümanıyla ilan edilmelidir.
+> Spring AMQP'de bu `QueueBuilder.durable("ai.analysis.request").deadLetterExchange("patimati.ai.dlx").build()` demektir.
+>
+> Ölü mektup kuyruğu (`ai.analysis.request.dlq`), DLX'e **kuyruk adıyla değil
+> `analysis.request` anahtarıyla** bağlanır: RabbitMQ mesajı ölü mektuba
+> düşürürken orijinal yönlendirme anahtarını korur. Yanlış bağlanırsa mesajlar
+> hata vermeden yok olur.
+>
+> Referans uygulama Python tarafında: `app/kuyruk.py: topolojiyi_kur()`.
 
 ---
 
@@ -202,8 +218,22 @@ Java bu durumda `ai_status = FAILED` yazar; ilan normal şekilde yayında kalır
 | `PHOTO_DOWNLOAD_FAILED` | Adres indirilemedi (404, zaman aşımı, çok büyük dosya) |
 | `INVALID_IMAGE` | İndirildi ama görüntü olarak açılamadı |
 | `UNSUPPORTED_SCHEMA` | `schema_version` tanınmıyor |
+| `INVALID_REQUEST` | Mesaj geçerli JSON ama sözleşmedeki alanları taşımıyor (eksik `ad_id`, yanlış tip...). **Gönderen taraftaki hatadır.** |
 | `MODEL_ERROR` | Model çalışırken hata verdi |
 | `INTERNAL` | Beklenmeyen hata |
+
+> `INVALID_REQUEST` neden `INTERNAL`den ayrıldı: `INTERNAL` "AI servisinde bir
+> şey patladı" demektir ve hatayı arayan kişiyi yanlış repoda arama yapmaya
+> gönderir. Eksik bir alan gönderen taraftaki hatadır; kodun bunu söylemesi
+> saatler kazandırır. (Kod eklemek kırıcı değildir, bkz. §9.)
+
+**Hata mesajında da `request_id` ve `ad_id` döner** — mesaj şemaya hiç uymasa
+bile, okunabildiği kadarıyla. Dönmezse Java hangi ilanın başarısız olduğunu
+bilemez ve o ilan sonsuza kadar `PENDING` kalır.
+
+Başarılı sonuçta ayrıca `failed_photos` alanı gelir (sözleşmeye sonradan
+eklendi, kırıcı değil): indirilemeyen fotoğrafların adresi ve sebebi. Kullanıcı
+3 fotoğraf yükleyip 1'iyle analiz edildiyse bunun bir izi kalsın diye.
 
 ---
 
@@ -383,8 +413,8 @@ yazmaya gerek yok.
 | Python AI — URL'den indirme + çoklu fotoğraf | ✅ `POST /analyze_url` — kuyruk akışıyla aynı kodu çağırır, RabbitMQ olmadan da denenebilir |
 | Python AI — SSRF koruması | ✅ Beyaz liste, yerel ağ engeli, bağlantı-yerel mutlak yasak, yönlendirme yok, boyut/zaman sınırı |
 | Python AI — cins (`breed`) | ✅ Yapıldı — 37 ırk zero-shot; top-1 %78, güven eşiği 0.70 üstünde %90 (ölçüm: `scripts/measure_breed.py`) |
-| Python AI — URL'den indirme | ⬜ Yapılacak |
-| Python AI — RabbitMQ tüketici/üretici | ⬜ Yapılacak |
+| Python AI — RabbitMQ tüketici/üretici | ✅ `app/kuyruk.py` — topoloji, tüketici, üretici, DLQ, yeniden bağlanma. Ayrı süreç: `python -m app.kuyruk`. 21 test broker olmadan koşuyor (`tests/test_kuyruk.py`) |
+| Python AI — uçtan uca kanıt | ✅ `scripts/sahte_java.py` — Java'nın yerine geçip istek yayınlar, sonucu dinler, sözleşmeye göre denetler |
 | Java — `Ad.photoUrls` | ⬜ KISIM 2'de |
 | Java — `ai_*` alanları | ⬜ AI sorumlusunda |
 | Java — kuyruk config + publisher + listener | ⬜ AI sorumlusunda |

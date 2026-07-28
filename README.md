@@ -18,7 +18,9 @@ Not: Plandaki Google Vision API, faturalandırma şartı nedeniyle CLIP zero-sho
 değiştirildi (PR #1 yorumlarında gerekçe ve ölçümler). `app/vision.py` dönüş yolu
 olarak duruyor; `google_key.json` + faturalandırmalı proje varsa tekrar bağlanabilir.
 
-Spring Boot backend bu servise HTTP ile bağlanır (bkz. teknik rapor bölüm 10).
+Spring Boot backend bu servise **RabbitMQ üzerinden asenkron** bağlanır; HTTP uçları
+elle deneme ve hata ayıklama için duruyor. Mesaj biçimleri ve kurallar:
+`docs/entegrasyon-sozlesmesi.md`.
 
 ## Kurulum
 
@@ -46,6 +48,50 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 # Swagger UI: http://localhost:8000/docs
 ```
 
+## Kuyruk köprüsü (RabbitMQ)
+
+Tüketici **ayrı bir süreçtir**, FastAPI'nin içinde değil: model çıkarımı CPU'yu
+saniyelerce meşgul eder ve aynı süreçte olsaydı HTTP isteklerini aç bırakırdı.
+
+```bash
+venv\Scripts\python.exe -m app.kuyruk
+```
+
+Ayarlar `.env` içinde (`AMQP_URL`, `AMQP_PREFETCH`, `AMQP_HEARTBEAT`).
+Topolojiyi tüketici kendisi ilan eder — elle kuyruk oluşturmaya gerek yok.
+
+### Lokal RabbitMQ (Windows, yönetici yetkisi gerekmez)
+
+Windows servisine kaydolmadan, zip'ten çalıştırılabilir:
+
+```powershell
+# Bir kez: Erlang 27.x (RabbitMQ 4.3 Erlang 28/29 ile ÇALIŞMAZ)
+winget install --id Erlang.ErlangOTP --version 27.3.4.13
+
+# Her açılışta
+$env:ERLANG_HOME = "C:\Program Files\Erlang OTP"
+& "C:\erp-backup\tools\rabbitmq\rabbitmq_server-4.3.4\sbin\rabbitmq-server.bat"
+```
+
+Yönetim arayüzü (kuyrukları gözle görmek için):
+
+```powershell
+& "...\sbin\rabbitmq-plugins.bat" enable rabbitmq_management
+# http://localhost:15672  — kullanıcı/parola: guest / guest
+```
+
+### Uçtan uca kanıt
+
+Java tarafı henüz yok; yerine geçen betik istek yayınlar, sonucu dinler ve
+sözleşmeye göre denetler:
+
+```bash
+venv\Scripts\python.exe scripts/sahte_java.py --dosya degerlendirme\test_resim.jpg
+```
+
+Yerel dosya kullanılıyorsa `.env` içinde `PHOTO_ALLOWED_HOSTS=127.0.0.1`
+olmalı — SSRF koruması aksi hâlde kendi makinemizi de reddeder (bilerek).
+
 ## Docker
 
 ```bash
@@ -67,12 +113,19 @@ pytest tests/
 
 ```
 app/
-├── main.py            # FastAPI giriş noktası
-├── embedder.py        # CLIP feature extraction (görüntü + metin)
-├── attributes.py      # Zero-shot tür/desen + piksel renk analizi (etiket kaynağı)
+├── main.py            # FastAPI giriş noktası (HTTP — deneme/hata ayıklama)
+├── kuyruk.py          # RabbitMQ köprüsü (üretim akışı) — ayrı süreç
+├── analiz.py          # Fotoğrafları uçtan uca analiz eder; HTTP ve kuyruk aynı yeri çağırır
+├── indirici.py        # Adresten fotoğraf indirme + SSRF koruması
+├── embedder.py        # CLIP (etiketçi) + seçilebilir kimlik modeli
+├── surum.py           # Kimlik modeli seçimi ve model sürümü
+├── attributes.py      # Zero-shot tür/desen/cins + piksel renk analizi
 ├── vision.py          # (opsiyonel/yedek) Google Vision — şu an kullanılmıyor
 ├── matcher.py         # Hibrit skor hesaplama
+├── hatalar.py         # Sözleşmedeki error.code karşılıkları
 └── models.py          # Pydantic şemaları
 tests/                 # Birim testler + seed_data/
-scripts/               # Yardımcı betikler (seed dataset vb.)
+scripts/               # Ölçüm ve yardımcı betikler (sahte_java.py = uçtan uca kanıt)
+degerlendirme/         # Dayanıklılık testleri (Paket 2)
+docs/                  # Entegrasyon sözleşmesi + ölçüm raporu + ölçüm sonuçları
 ```
