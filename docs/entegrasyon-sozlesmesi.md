@@ -435,7 +435,7 @@ yazmaya gerek yok.
 | Onaylayınca ilan kapanır mı? | **Hayır.** İlanı kapatmak ilan sahibinin elle yapacağı ayrı bir iştir | Yok, ama aşağıdaki nota bak |
 | Eşleşme yarıçapı 25 km | Uygun | Yok — süzme Java'da (§5) |
 | S3 adresleri | **Public URL** | Kimlik doğrulama kodu gerekmiyor; beyaz liste yine şart (§10) |
-| RabbitMQ'yu dağıtım ortamında kim kurar? | **Zahid** | Lokal taraf çözüldü (zip'ten, yönetici yetkisi gerekmeden — bkz. README). Dağıtımda kuyruk adlarının ve argümanlarının §2'deki gibi olması şart |
+| RabbitMQ'yu dağıtım ortamında kim kurar? | **Fatih** — sunucuyu kendisi kuracağını söyledi (2026-07-29) | Lokal taraf çözüldü (zip'ten, yönetici yetkisi gerekmeden — bkz. README). Dağıtımda kuyruk adlarının ve argümanlarının §2'deki gibi olması şart. AI tarafı kurulum ayarlarını hazır tarif olarak teslim edecek |
 
 > ⚠️ **"Onay ilanı kapatmıyor" kararının bir sonucu var.** İlan aktif kaldığı
 > için aday havuzunda kalmaya devam eder. Aynı ilan yeniden analiz edilirse
