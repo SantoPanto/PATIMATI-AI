@@ -51,20 +51,31 @@ def main():
     # Sistemin yabancı bir hayvana verdiği "EN YÜKSEK" benzerlik skorunu buluyoruz
     en_yuksek_skorlar = np.max(benzerlik_matrisi, axis=1)
     
-    esik_degeri = 0.70  # İbrahim'in raporundaki bildirim eşiği
-    
-    # Yabancı bir hayvana %70 ve üzeri skor verirse bu bir YANLIŞ ALARMDIR (False Positive)
-    yanlis_alarmlar = np.sum(en_yuksek_skorlar >= esik_degeri)
     toplam_yabanci_sorgu = len(en_yuksek_skorlar)
-    yanlis_alarm_orani = (yanlis_alarmlar / toplam_yabanci_sorgu) * 100
-    
-    print(f"\n--- SONUÇLAR (Eşik Değeri: %{int(esik_degeri*100)}) ---")
+
+    # Sabit 0.70 yerine ham görsel skorda 0.50-0.95 arası eşik taraması yapıyoruz.
+    # Not: Uygulamadaki 0.70 eşiği hibrit final skora uygulanır; bu tablo ham
+    # görsel maksimum skorun açık-küme davranışını okumak içindir.
+    esikler = np.round(np.arange(0.50, 0.951, 0.05), 2)
+
+    print("\n--- EŞİK TARAMASI SONUÇLARI (Ham Görsel Maksimum Skor) ---")
     print(f"Test Edilen Yabancı Fotoğraf Sayısı: {toplam_yabanci_sorgu}")
-    print(f"Sistemin Başka Bir Hayvana Benzetip 'Eşleşti!' Diyerek Hata Yaptığı: {yanlis_alarmlar}")
-    print(f"Yanlış Alarm Oranı (False Positive Rate): %{yanlis_alarm_orani:.1f}")
-    
-    print("\n>>> SİSTEMİN GÜVENLE 'EŞLEŞME YOK' DİYEBİLME BAŞARISI (True Negative Rate):")
-    print(f">>> %{100 - yanlis_alarm_orani:.1f} <<<")
+    print()
+    print(f"{'Eşik':>6} | {'Yanlış Alarm':>13} | {'False Positive Rate':>20} | {'True Negative Rate':>18}")
+    print("-" * 68)
+
+    for esik_degeri in esikler:
+        # Yabancı bir hayvana eşik ve üzeri skor verilirse bu bir YANLIŞ ALARMDIR.
+        yanlis_alarmlar = np.sum(en_yuksek_skorlar >= esik_degeri)
+        yanlis_alarm_orani = (yanlis_alarmlar / toplam_yabanci_sorgu) * 100
+        true_negative_orani = 100 - yanlis_alarm_orani
+
+        print(
+            f"{esik_degeri:>6.2f} | "
+            f"{yanlis_alarmlar:>5}/{toplam_yabanci_sorgu:<7} | "
+            f"%{yanlis_alarm_orani:>18.1f} | "
+            f"%{true_negative_orani:>16.1f}"
+        )
 
 if __name__ == "__main__":
     main()

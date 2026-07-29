@@ -12,7 +12,7 @@ betikten gelir; hiçbiri tahmin değildir.
 | `scripts/measure_threshold.py` | Eşik taraması (sentetik "aynı birey" simülasyonu) |
 | `scripts/gercek_veri_olcum.py` | **Gerçek dünya fotoğraflarıyla eşik ve hayvan kapısı doğrulaması** |
 | `scripts/teshis_arkaplan.py` | **Skor hayvandan mı arka plandan mı geliyor?** (tam / kırpılmış / hayvansız, AUC ile) |
-
+| `scripts/eslesme_yok_testi.py` | **Açık Küme (Open-Set) yanlış alarm ve eşik taraması** |
 > **Veri notu:** Gerçek dünya fotoğrafları (`tests/gercek_veri/`) KVKK gereği
 > repoya dâhil edilmez — sokak ve iç mekân kareleri uzaktan da olsa insan
 > içerebiliyor. Ölçümü tekrarlamak için kendi fotoğraflarınızı aynı klasör
@@ -192,6 +192,38 @@ bireyler içeren bir kümeyle verilecek (`wildlife-datasets` → `CatIndividualI
 Çoklu fotoğraf kaybedilen duyarlılığı geri getiriyor ve yanlış alarm üretmiyor.
 **Bu yüzden `MatchCandidate.embeddings` bir listedir ve sözleşme ilan başına
 birden çok fotoğraf zorunlu kılar.**
+
+### 4.1. Açık Küme (Open-Set) Eşik Taraması ve Yanlış Alarm (FPR) Analizi
+
+**Amaç:** Sisteme tamamen yabancı olan hayvanların (eşleşme yok durumu), sadece "ham görsel kosinüs benzerliği" kullanılarak değerlendirildiğinde ne oranda yanlış alarm (False Positive) ürettiğini ölçmek.
+
+**Metodoloji:** 
+Sistemde kayıtlı 50 hayvana (147 galeri fotoğrafı) karşı, sisteme tamamen yabancı 50 farklı hayvan (150 sorgu fotoğrafı) test edilmiş ve 0.50 - 0.95 aralığında eşik taraması (Threshold Sweep) yapılmıştır.
+
+**Bulgular (Ham Görsel Skor):**
+Aşağıdaki tablo, sistemin sadece ham görsel skora güvenmesi durumunda ne oranda hata yapacağını göstermektedir:
+
+```text
+  Eşik |  Yanlış Alarm |  False Positive Rate | True Negative Rate
+--------------------------------------------------------------------
+  0.50 |   150/150     | %              100.0 | %              0.0
+  0.55 |   150/150     | %              100.0 | %              0.0
+  0.60 |   150/150     | %              100.0 | %              0.0
+  0.65 |   150/150     | %              100.0 | %              0.0
+  0.70 |   150/150     | %              100.0 | %              0.0
+  0.75 |   149/150     | %               99.3 | %              0.7
+  0.80 |   149/150     | %               99.3 | %              0.7
+  0.85 |   146/150     | %               97.3 | %              2.7
+  0.90 |   122/150     | %               81.3 | %             18.7
+  0.95 |    24/150     | %               16.0 | %             84.0
+```
+
+* **0.70 - 0.85 Eşik Aralığı:** Modelin doğası gereği ham görsel benzerlik skorları çok yüksek bir tabandan başladığı için, 0.85 barajında bile yabancı hayvanların **%97.3'ü** sistemdeki başka bir hayvana benzetilerek yanlış alarm üretmiştir.
+* **0.90 Eşiği:** Yanlış alarm oranı %81.3 seviyesindedir.
+* **0.95 Eşiği:** Sistemin yabancı bir hayvanı tatmin edici bir oranda (%84.0 True Negative) reddedebilmesi için ham eşiğin 0.95 seviyesine çıkması gerekmiştir (Bu noktada FPR %16.0'dır).
+
+**Sonuç ve Teknik Çıkarım:**
+Veritabanı büyüdükçe bu yanlış alarm riskinin (FPR) daha da artacağı öngörülmektedir. Bu ölçüm, 0.70'lik bildirim eşiğinin doğrudan ham görsel skora değil, mutlaka konum ve etiket ağırlıklarını içeren **Hibrit Final Skora** uygulanması gerektiğini istatistiksel olarak kanıtlamıştır. Sadece görsel benzerlik vektörleriyle açık küme koruması sağlamak operasyonel olarak mümkün görünmemektedir.
 
 ---
 
