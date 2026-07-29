@@ -378,7 +378,25 @@ yazmaya gerek yok.
 
 - AI servisi **iç ağda** kalmalı, internete açık olmamalıdır. Zorunlu olarak
   açılacaksa paylaşılan bir gizli anahtar başlığı istenir.
-- **S3 fotoğrafları public URL ile sunulacak** (karar: Fatih, 2026-07-28).
+- **Fotoğraflar kendi alan adımızın alt alan adından sunulacak** (karar: Fatih,
+  2026-07-29). Ham S3 adresi (`patimati-media.s3.eu-central-1.amazonaws.com`)
+  yerine `cdn.<alanadi>` / `media.<alanadi>` gibi bir adres belirlenecek; DNS'te
+  CNAME ile S3'e (ya da önüne konacak CloudFront'a) yönlendirilecek.
+
+  Neden AI tarafı için de doğru karar: beyaz listeye **tek ve kalıcı** bir ad
+  yazılıyor. Yarın S3'ten başka bir sağlayıcıya geçilse, CloudFront eklense ya
+  da kova adı değişse AI tarafında hiçbir şey değişmez — kodda da, ayarda da.
+
+  > ⚠️ **CNAME olmalı, HTTP yönlendirmesi DEĞİL.** AI indiricisi yönlendirmeleri
+  > bilerek takip etmiyor (her sıçramayı yeniden doğrulayamayacağı için — §10
+  > SSRF korumaları). `cdn.<alanadi>` DNS seviyesinde S3'e işaret ederse sorun
+  > yok; ama sunucu `301/302` ile ham S3 adresine yönlendirirse **her indirme
+  > başarısız olur** (`PHOTO_DOWNLOAD_FAILED`). Kurulumu yapan kişi bunu bilsin.
+
+  Somut değer belli olunca yapılacak tek şey: `.env` içinde
+  `PHOTO_ALLOWED_HOSTS=cdn.<alanadi>`. Kod değişmiyor.
+
+- **Adresler public** (karar: Fatih, 2026-07-28).
   Gerekçe: ilan görselleri herkese hızlıca açılabilmeli. AI servisi hiçbir
   token, yetkilendirme başlığı ya da imzalı adres parametresiyle uğraşmaz;
   düz adresten indirir. Presigned adres seçilseydi süresinin en az 10 dakika
@@ -413,7 +431,7 @@ yazmaya gerek yok.
 
 | Soru | Karar | AI tarafına etkisi |
 |---|---|---|
-| Eşleşme bildirimi kime gider? | İlanın sahibine | Yok — bildirimi Java gönderiyor, AI yalnızca sıralı liste üretiyor |
+| Eşleşme bildirimi kime gider? | **Her iki ilanın sahibine de** (2026-07-29'da netleşti) | Yok — bildirimi Java gönderiyor, AI yalnızca sıralı liste üretiyor |
 | Onaylayınca ilan kapanır mı? | **Hayır.** İlanı kapatmak ilan sahibinin elle yapacağı ayrı bir iştir | Yok, ama aşağıdaki nota bak |
 | Eşleşme yarıçapı 25 km | Uygun | Yok — süzme Java'da (§5) |
 | S3 adresleri | **Public URL** | Kimlik doğrulama kodu gerekmiyor; beyaz liste yine şart (§10) |
@@ -433,9 +451,8 @@ yazmaya gerek yok.
    bir eşleşmede İKİ ilan var: yeni verilen ve eşleşen eski ilan. Kaybettiği
    hayvanı arayan da, bulduğu hayvanı bildiren de haber almak ister — bu
    yüzden büyük ihtimalle cevap "ikisine de", ama netleşmeli.
-2. **S3 kova alan adı ne?** `PHOTO_ALLOWED_HOSTS`'a yazılması gereken tam alan
-   adı bilinmiyor. Bu gelmeden AI üretimde hiçbir fotoğrafı indiremez —
-   beyaz listede olmayan adres reddedilir (§10).
+2. **Alt alan adı ne olacak?** Yaklaşım karara bağlandı (aşağıya bak), sadece
+   somut değer bekleniyor: `cdn.<alanadi>` mı `media.<alanadi>` mı.
 3. ~~Boş `PHOTO_ALLOWED_HOSTS` ne yapmalı?~~ **Karara bağlandı (2026-07-29):
    kapalıya düşer.** Liste boşsa hiçbir adres indirilmez; hata mesajı ne
    yazılması gerektiğini söyler. Öncesinde boş liste dış adresleri serbest
