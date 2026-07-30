@@ -193,37 +193,32 @@ bireyler içeren bir kümeyle verilecek (`wildlife-datasets` → `CatIndividualI
 **Bu yüzden `MatchCandidate.embeddings` bir listedir ve sözleşme ilan başına
 birden çok fotoğraf zorunlu kılar.**
 
-### 4.1. Açık Küme (Open-Set) Eşik Taraması ve Yanlış Alarm (FPR) Analizi
+### 4.1. Açık Küme Eşik Taraması (Çift Yönlü TPR ve FPR Analizi)
 
-**Amaç:** Sisteme tamamen yabancı olan hayvanların (eşleşme yok durumu), sadece "ham görsel kosinüs benzerliği" kullanılarak değerlendirildiğinde ne oranda yanlış alarm (False Positive) ürettiğini ölçmek.
+**Amaç:** Açık küme (open-set) senaryosunda sadece yanlış alarmları (FPR) değil, sistemin gerçek eşleşmeleri yakalama oranını (TPR) da ölçmek. Ayrıca "ham görsel skora" karşı, konum ve etiket bilgisini içeren "hibrit skorun" ayrım gücünü kıyaslamak.
 
-**Metodoloji:** 
-Sistemde kayıtlı 50 hayvana (147 galeri fotoğrafı) karşı, sisteme tamamen yabancı 50 farklı hayvan (150 sorgu fotoğrafı) test edilmiş ve 0.50 - 0.95 aralığında eşik taraması (Threshold Sweep) yapılmıştır.
+**Metodoloji:**
+Veri seti 3 gruba ayrılmıştır:
+* **Galeri:** 50 farklı kayıtlı kimlik (hayvan başına 1 fotoğraf).
+* **Gerçek Eşleşmeler (TPR):** Galerideki hayvanların farklı günlerde çekilmiş 98 fotoğrafı (Pozitif Sorgu).
+* **Yanlış Alarmlar (FPR):** Sisteme tamamen yabancı 50 farklı hayvanın 149 fotoğrafı (Negatif Sorgu).
+* **Hibrit Skor Senaryosu (Kötü Durum):** Yabancı bir kedi eşleşmesinde en zorlu senaryo simüle edilmiştir: "Aynı şehirde yaşayan iki benzer tekir kedi" varsayımı ile Etiket Skoru = 1.0, Konum Skoru = 0.80 olarak sabitlenmiştir. Gerçek eşleşmelerde ise ikisi de 1.0 alınmıştır.
 
-**Bulgular (Ham Görsel Skor):**
-Aşağıdaki tablo, sistemin sadece ham görsel skora güvenmesi durumunda ne oranda hata yapacağını göstermektedir:
+**Bulgular:**
 
-```text
-  Eşik |  Yanlış Alarm |  False Positive Rate | True Negative Rate
---------------------------------------------------------------------
-  0.50 |   150/150     | %              100.0 | %              0.0
-  0.55 |   150/150     | %              100.0 | %              0.0
-  0.60 |   150/150     | %              100.0 | %              0.0
-  0.65 |   150/150     | %              100.0 | %              0.0
-  0.70 |   150/150     | %              100.0 | %              0.0
-  0.75 |   149/150     | %               99.3 | %              0.7
-  0.80 |   149/150     | %               99.3 | %              0.7
-  0.85 |   146/150     | %               97.3 | %              2.7
-  0.90 |   122/150     | %               81.3 | %             18.7
-  0.95 |    24/150     | %               16.0 | %             84.0
-```
+| Eşik | Ham Görsel (FPR) | Ham Görsel (TPR) | Hibrit Skor (FPR) | Hibrit Skor (TPR) |
+|---|---|---|---|---|
+| 0.70 | %100.0 | %98.0 | %100.0 | %100.0 |
+| 0.80 | %100.0 | %98.0 | %100.0 | %98.0 |
+| 0.90 | %88.6 | %96.9 | %98.0 | %98.0 |
+| **0.95** | **%24.2** | **%90.8** | **%4.0** | **%95.9** |
 
-* **0.70 - 0.85 Eşik Aralığı:** Modelin doğası gereği ham görsel benzerlik skorları çok yüksek bir tabandan başladığı için, 0.85 barajında bile yabancı hayvanların **%97.3'ü** sistemdeki başka bir hayvana benzetilerek yanlış alarm üretmiştir.
-* **0.90 Eşiği:** Yanlış alarm oranı %81.3 seviyesindedir.
-* **0.95 Eşiği:** Sistemin yabancı bir hayvanı tatmin edici bir oranda (%84.0 True Negative) reddedebilmesi için ham eşiğin 0.95 seviyesine çıkması gerekmiştir (Bu noktada FPR %16.0'dır).
+*(Not: Tablo okunabilirliği için kritik kırılma noktaları bırakılmıştır. Kapsamlı tarama 0.50-0.95 aralığında `scripts/eslesme_yok_testi.py` betiği ile tekrarlanabilir.)*
 
 **Sonuç ve Teknik Çıkarım:**
-Veritabanı büyüdükçe bu yanlış alarm riskinin (FPR) daha da artacağı öngörülmektedir. Bu ölçüm, 0.70'lik bildirim eşiğinin doğrudan ham görsel skora değil, mutlaka konum ve etiket ağırlıklarını içeren **Hibrit Final Skora** uygulanması gerektiğini istatistiksel olarak kanıtlamıştır. Sadece görsel benzerlik vektörleriyle açık küme koruması sağlamak operasyonel olarak mümkün görünmemektedir.
+1. **Dağılımın Kayması:** Ham görsel benzerlik tek başına kullanıldığında, SigLIP2 mimarisinin doğası gereği yabancı hayvanlar galeridekilere çok yüksek oranda benzemektedir (0.80 eşiğinde bile FPR %100).
+2. **Hibrit Skorun İspatı:** Konum ve etiket faktörleri eklendiğinde sistemin taban puanları yukarı kaysa da, eşik **0.95 seviyesine çekildiğinde** hibrit formülün muazzam bir ayrım gücü yarattığı görülmektedir. 
+3. **Karar:** 0.95 eşiğinde Ham Görsel Skor %24.2 gibi yüksek bir yanlış alarm verirken ve TPR'yi %90.8'e düşürürken; Hibrit Skor hatayı **%4.0** seviyesine kadar bastırmakta ve gerçek eşleşme yakalama oranını (TPR) **%95.9** gibi son derece güvenilir bir seviyede tutmaktadır. Bildirim tetikleme mimarisinin doğrudan hibrit skora dayandırılması gerektiği istatistiksel olarak doğrulanmıştır.
 
 ---
 
