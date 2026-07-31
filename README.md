@@ -2,8 +2,10 @@
 
 PatiMati (PawFinder) kayıp hayvan eşleştirme platformunun yapay zeka servisi.
 
-Aşama A yaklaşımı: model eğitimi YOK — önceden eğitilmiş modellerle özellik
-çıkarma (feature extraction) ve hibrit skorlama.
+Aşama A yaklaşımı: üretim serve akışında model eğitimi YOK — önceden eğitilmiş
+(ya da elle fine-tune edilmiş) modellerle özellik çıkarma (feature extraction) ve
+hibrit skorlama. `scripts/train.py` ile SigLIP2 backbone'unu fine-tune etmek ayrı,
+elle çalıştırılan bir offline pipeline'dır — bkz. [Model Eğitimi](#model-eğitimi-fine-tuning-opsiyonel).
 
 ## Mimari
 
@@ -121,6 +123,35 @@ python scripts/prepare_seed.py   # Oxford-IIIT Pet seed dataset'i indirir (bir k
 pytest tests/
 ```
 
+## Model Eğitimi (fine-tuning, opsiyonel)
+
+SigLIP2 görüntü backbone'unu kendi verimizle ArcFace kaybıyla fine-tune eden
+ayrı bir pipeline. Üretim servisinde ÇALIŞMAZ; yalnızca elle, model
+geliştirirken kullanılır. `wildlife-tools` gibi ağır bağımlılıklar bu yüzden
+`requirements.txt`'te DEĞİL, ayrı bir dosyada:
+
+```bash
+pip install -r requirements-train.txt
+```
+
+Veri, her klasörü bir hayvanın kimliği (`animal_id`) olan bir yapı bekler
+(`<animal_id>/<foto>.jpg`, bkz. `app/services/image_service.py`). Uçtan uca akış:
+
+```bash
+# 1) Ham (animal_id klasörlü) veriyi train/val/test'e böl
+python scripts/prepare_dataset.py --source-dir data/raw --output-dir data \
+    --val-ratio 0.15 --test-ratio 0.15
+
+# 2) Fine-tuning öncesi referans (baseline) doğruluğunu ölç — train.py bu
+#    dosyanın var olmasını ZORUNLU tutar, körlemesine fine-tune'u engeller
+python scripts/evaluate_baseline.py --data-dir data/test \
+    --output-dir outputs/evaluations/baseline
+
+# 3) Fine-tuning
+python scripts/train.py --train-dir data/train --val-dir data/val \
+    --output-dir outputs/training/run_001 --epochs 10
+```
+
 ## Klasör Yapısı
 
 ```
@@ -135,9 +166,13 @@ app/
 ├── vision.py          # (opsiyonel/yedek) Google Vision — şu an kullanılmıyor
 ├── matcher.py         # Hibrit skor hesaplama
 ├── hatalar.py         # Sözleşmedeki error.code karşılıkları
-└── models.py          # Pydantic şemaları
+├── models.py          # Pydantic şemaları
+├── device.py          # torch cihaz seçimi (yalnızca scripts/train.py kullanır)
+└── services/
+    └── image_service.py   # animal_id klasör tarama + görüntü yükleme (eğitim pipeline'ı)
 tests/                 # Birim testler + seed_data/
 scripts/               # Ölçüm ve yardımcı betikler (sahte_java.py = uçtan uca kanıt)
+                        # + eğitim pipeline'ı: prepare_dataset.py, evaluate_baseline.py, train.py
 degerlendirme/         # Dayanıklılık testleri (Paket 2)
 docs/                  # Entegrasyon sözleşmesi + ölçüm raporu + ölçüm sonuçları
 ```

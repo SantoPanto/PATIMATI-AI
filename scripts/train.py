@@ -389,7 +389,7 @@ def main() -> None:
         )
 
     device = get_device()
-    set_seed(args.seed, device=str(device))
+    set_seed(args.seed)
     print(f"Cihaz: {device} | Seed: {args.seed}")
 
     label_to_index = {animal_id: i for i, animal_id in enumerate(train_animal_ids)}
