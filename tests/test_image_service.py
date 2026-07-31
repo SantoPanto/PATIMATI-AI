@@ -85,6 +85,26 @@ def test_bozuk_dosya_unreadable_olarak_raporlanir(tmp_path):
     assert [p.name for p in scan.unreadable_files] == ["bozuk.jpg"]
 
 
+def test_sonu_kesik_dosya_unreadable_olarak_raporlanir(tmp_path):
+    """Gerçek bir 'kesik indirme' senaryosu: dosyanın sonundan birkaç bayt eksik
+    (EOI işaretçisi gitmiş), gövdenin geri kalanı sağlam. `Image.verify()`'ı GEÇER
+    (Pillow dokümantasyonu: verify() dosyayı decode etmeden yalnızca yapıyı
+    kontrol eder — ölçüldü, doğrulandı) ama `Image.load()` doğru şekilde reddeder.
+    Tarama bunu yakalamazsa dosya saatler süren bir eğitimin ortasında patlar."""
+    good_path = tmp_path / "kedi1" / "iyi.jpg"
+    (tmp_path / "kedi1").mkdir()
+    Image.new("RGB", (256, 256), (10, 20, 30)).save(good_path, format="JPEG", quality=95)
+    tam_bytes = good_path.read_bytes()
+
+    kesik_path = tmp_path / "kedi1" / "kesik.jpg"
+    kesik_path.write_bytes(tam_bytes[:-50])  # EOI işaretçisi dahil son 50 bayt gitti
+
+    scan = scan_animal_dataset(tmp_path)
+
+    assert [i.path.name for i in scan.images] == ["iyi.jpg"]
+    assert [p.name for p in scan.unreadable_files] == ["kesik.jpg"]
+
+
 def test_gecerli_goruntusu_olmayan_klasor_bos_olarak_raporlanir(tmp_path):
     (tmp_path / "kedi1").mkdir()
     _jpg(tmp_path / "kedi1" / "a.jpg")

@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.services.image_service import (  # noqa: E402
     DatasetScan,
+    ScannedImage,
     report_scan_issues,
     scan_animal_dataset,
 )
@@ -78,7 +79,9 @@ def _split_counts(n: int, val_ratio: float, test_ratio: float) -> tuple[int, int
     return n_train, n_val, n_test
 
 
-def _copy_split(images: list, animal_id: str, split_name: str, output_dir: Path) -> None:
+def _copy_split(
+    images: list[ScannedImage], animal_id: str, split_name: str, output_dir: Path
+) -> None:
     dest_dir = output_dir / split_name / animal_id
     dest_dir.mkdir(parents=True, exist_ok=True)
     for scanned in images:
@@ -89,7 +92,7 @@ def split_dataset(
     scan: DatasetScan, output_dir: Path, val_ratio: float, test_ratio: float, seed: int
 ) -> dict[str, int]:
     rng = random.Random(seed)
-    by_animal: dict[str, list] = {}
+    by_animal: dict[str, list[ScannedImage]] = {}
     for img in scan.images:
         by_animal.setdefault(img.animal_id, []).append(img)
 
@@ -124,6 +127,19 @@ def split_dataset(
     return counts
 
 
+def _output_inside_source(source_dir: Path, output_dir: Path) -> bool:
+    """`--output-dir`, `--source-dir` ile aynıysa ya da onun içindeyse True döner.
+
+    Bu durumda iki şey sessizce bozulur: (1) bir önceki koşudan kalma train/val/test
+    klasörleri, `source_dir` taranırken sanki birer `animal_id` klasörüymüş gibi
+    tekrar okunur; (2) `--overwrite` verildiyse rmtree, kaynak verinin bir parçasını
+    silebilir. Kaynak klasör henüz yoksa (`resolve()` yine de path'i normalize eder)
+    kontrol yine de anlamlı kalır."""
+    source_resolved = source_dir.resolve()
+    output_resolved = output_dir.resolve()
+    return output_resolved == source_resolved or source_resolved in output_resolved.parents
+
+
 def _ensure_clean_output(output_dir: Path, overwrite: bool) -> None:
     """train/val/test altında dosya varsa eski ve yeni verinin sessizce karışmasını
     önler: `--overwrite` verilmediyse hata verip durur, verildiyse önce siler."""
@@ -151,6 +167,13 @@ def main() -> None:
 
     if args.val_ratio < 0 or args.test_ratio < 0 or args.val_ratio + args.test_ratio >= 1:
         print("Hata: --val-ratio ve --test-ratio negatif olamaz, toplamları 1'den küçük olmalı.")
+        raise SystemExit(1)
+
+    if _output_inside_source(args.source_dir, args.output_dir):
+        print(
+            "Hata: --output-dir, --source-dir ile aynı ya da onun içinde olamaz "
+            "(bölünmüş çıktı, kaynak taramaya karışır)."
+        )
         raise SystemExit(1)
 
     _ensure_clean_output(args.output_dir, args.overwrite)

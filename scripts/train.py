@@ -380,7 +380,9 @@ def main() -> None:
         )
         raise SystemExit(1)
 
-    val_scan = scan_animal_dataset(args.val_dir) if args.val_dir.exists() else None
+    val_scan = (
+        scan_animal_dataset(args.val_dir) if args.val_dir.is_dir() else None
+    )
     if val_scan is not None:
         report_scan_issues(val_scan)
     else:

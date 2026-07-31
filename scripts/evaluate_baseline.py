@@ -122,7 +122,8 @@ def leave_one_out_accuracy(
     return {
         "processed_queries": n,
         "top1_accuracy": top1_correct / n if n else None,
-        "top5_accuracy": topk_correct / n if n else None,
+        "top_k": top_k,
+        "topk_accuracy": topk_correct / n if n else None,
     }
 
 
@@ -159,7 +160,12 @@ def main() -> None:
         results = {
             "model_name": args.model_name,
             "data_dir": str(args.data_dir),
-            "metrics": {"processed_queries": 0, "top1_accuracy": None, "top5_accuracy": None},
+            "metrics": {
+                "processed_queries": 0,
+                "top1_accuracy": None,
+                "top_k": args.top_k,
+                "topk_accuracy": None,
+            },
         }
         results_path.write_text(
             json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8"
@@ -190,7 +196,7 @@ def main() -> None:
     print("=" * 60)
     print(f"Sorgu sayısı : {metrics['processed_queries']}")
     print(f"Top-1        : {metrics['top1_accuracy']:.4f}")
-    print(f"Top-{args.top_k}        : {metrics['top5_accuracy']:.4f}")
+    print(f"Top-{args.top_k:<8}: {metrics['topk_accuracy']:.4f}")
     print(f"Sonuç yazıldı: {results_path}")
     print("=" * 60)
 

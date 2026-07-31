@@ -23,10 +23,15 @@ tamamen atlanır.
 ayarına göre CLIP (~400 MB) ya da SigLIP2 (~1,4 GB) ağırlıklarını indirip
 belleğe yüklüyor. Sadece bir klasör taramak/görüntü açmak için bunu tetiklemek
 yanlış bağlantı olurdu; bu yüzden `load_rgb_image` kendi asgari açma mantığını
-taşıyor (EXIF döndürme, şeffaflık düzeltmesi, asgari boyut kontrolü). Tarama
-sırasında yapılan kontrol ise ayrıca ucuz bir `Image.verify()`'dır; tam decode
-yalnızca `load_rgb_image` çağrıldığında, yani eğitim gerçekten o görüntüyü
-kullandığında yapılır.
+taşıyor (EXIF döndürme, şeffaflık düzeltmesi, asgari boyut kontrolü).
+
+Tarama sırasında yapılan kontrol tam bir piksel decode'udur (`Image.load()`),
+`Image.verify()` DEĞİL: Pillow'un kendi dokümantasyonu verify()'ın "dosyayı
+decode etmeden yalnızca başlığı" kontrol ettiğini söylüyor — yani başı sağlam
+ama gövdesi kesik (truncated) bir JPEG verify()'ı geçer, ama saatler süren bir
+eğitimin ortasında `load_rgb_image` onu açmaya çalıştığında çöker. Tarama
+sırasında bir kez daha maliyetli olsa da, eğitim başladıktan sonra rastgele bir
+epoch'ta çökmekten iyidir.
 """
 
 from __future__ import annotations
@@ -63,11 +68,12 @@ class DatasetScan:
 
 
 def _is_probably_image(path: Path) -> bool:
-    """Ucuz bir bozukluk kontrolü. `Image.verify()` tam decode yapmaz; asıl
-    doğrulama (EXIF, şeffaflık, asgari boyut) `load_rgb_image` çağrıldığında olur."""
+    """Tam piksel decode'u ile bozukluk kontrolü (bkz. dosya başındaki not —
+    `Image.verify()` kasıtlı olarak kullanılmıyor, truncated dosyaları kaçırıyor).
+    EXIF/şeffaflık/asgari boyut gibi asıl dönüşüm yine `load_rgb_image`'da olur."""
     try:
         with Image.open(path) as img:
-            img.verify()
+            img.load()
         return True
     except (UnidentifiedImageError, OSError):
         return False
