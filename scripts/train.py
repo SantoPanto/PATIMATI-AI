@@ -48,13 +48,48 @@ from transformers import AutoModel, AutoProcessor  # noqa: E402
 from wildlife_tools.train.objective import ArcFaceLoss  # noqa: E402
 from wildlife_tools.train.trainer import BasicTrainer, set_seed  # noqa: E402
 
-from app.device import get_device  # noqa: E402
-from app.services.image_service import (  # noqa: E402
-    ScannedImage,
-    load_rgb_image,
-    report_scan_issues,
-    scan_animal_dataset,
-)
+from dataclasses import dataclass
+from PIL import Image
+
+def get_device() -> torch.device:
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+@dataclass
+class ScannedImage:
+    path: Path
+    animal_id: str
+
+@dataclass
+class DatasetScan:
+    images: list[ScannedImage]
+    issues: list[str]
+
+def load_rgb_image(path: Path) -> Image.Image:
+    with Image.open(path) as img:
+        return img.convert("RGB")
+
+def scan_animal_dataset(data_dir: Path) -> DatasetScan:
+    if not data_dir.is_dir():
+        raise FileNotFoundError(f"Klasör bulunamadı: {data_dir}")
+    images = []
+    issues = []
+    for animal_dir in data_dir.iterdir():
+        if not animal_dir.is_dir():
+            continue
+        animal_id = animal_dir.name
+        animal_imgs = [
+            ScannedImage(path=f, animal_id=animal_id) 
+            for f in animal_dir.iterdir() 
+            if f.suffix.lower() in [".jpg", ".jpeg", ".png"]
+        ]
+        if not animal_imgs:
+            issues.append(f"Hayvan '{animal_id}' klasörü boş.")
+        images.extend(animal_imgs)
+    return DatasetScan(images=images, issues=issues)
+
+def report_scan_issues(scan: DatasetScan) -> None:
+    for issue in scan.issues:
+        print(f"Uyarı: {issue}")
 
 MODEL_NAME = "google/siglip2-base-patch16-224"
 MIN_TRAIN_IDENTITIES = 2

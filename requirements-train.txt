@@ -1,12 +1,2 @@
-# Yalnızca scripts/train.py (model fine-tuning) için ek bağımlılıklar.
-# Servisi çalıştırmak için bunlara gerek YOK — sadece requirements.txt yeterli.
-# Kurulum: pip install -r requirements.txt -r requirements-train.txt
-#
-# wildlife-tools ağır bir kütüphane (timm, pandas, scikit-learn, opencv, kornia, FAISS,
-# tensorboard gibi bağımlılıkları da beraberinde getiriyor) ama script zaten onun
-# BasicTrainer / ArcFaceLoss bileşenleriyle yazılmış; production'da hiç kullanılmadığı
-# için ağırlığı sorun değil. Mevcut torch==2.13.0 / transformers==5.14.1 ile çakışmadığı
-# test edildi (wildlife-tools >=2.0.1 / >=4.30.2 istiyor, ikisi de sağlanıyor).
--r requirements.txt
-wildlife-tools==0.0.9
-matplotlib==3.11.1
+wildlife-tools>=1.2.0
+matplotlib>=3.7.0
