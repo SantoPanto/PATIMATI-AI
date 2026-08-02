@@ -2,3 +2,4 @@ tests/seed_data/
 tmp/
 __pycache__/
 *.pyc
+data/
