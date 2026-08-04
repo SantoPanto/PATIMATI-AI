@@ -126,7 +126,7 @@ def compute_extended_score(a_emb, b_emb, a_base_labels, b_base_labels, a_hard, b
     for cat in a_soft.keys():
         if cat in b_soft:
             if a_soft[cat] == b_soft[cat]:
-                score += 0.05  # Bonus
+                score += 0.02  # Bonus (tavana vurmaması için 0.02'ye düşürüldü)
             # Eşleşmezse ceza YOK!
             
     return min(score, 1.0)
@@ -219,6 +219,7 @@ def run_experiment_on_dataset(dataset_name, max_individuals):
 
 def main():
     run_experiment_on_dataset("DogFaceNet", max_individuals=100)
+    run_experiment_on_dataset("CatIndividualImages", max_individuals=100)
 
 if __name__ == "__main__":
     main()
