@@ -1,0 +1,16 @@
+{
+  "top1": 0.8961038961038961,
+  "top5": 0.9499072356215214,
+  "map": 0.8045706946709881,
+  "roc_auc": 0.9730618175948067,
+  "eer": 0.088502694193441,
+  "sorgu_sayisi": 539,
+  "aday": "google-siglip1",
+  "model": "google/siglip-base-patch16-224",
+  "boyut": 768,
+  "veri": "CatIndividualImages_arkaplan",
+  "birey": 138,
+  "fotograf": 539,
+  "tohum": 42,
+  "saniye_foto": 0.14
+}

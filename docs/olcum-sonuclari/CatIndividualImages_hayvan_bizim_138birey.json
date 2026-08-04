@@ -1,0 +1,16 @@
+{
+  "top1": 0.9554730983302412,
+  "top5": 0.9833024118738405,
+  "map": 0.9019958501731112,
+  "roc_auc": 0.9782616848377533,
+  "eer": 0.06065922787259274,
+  "sorgu_sayisi": 539,
+  "aday": "bizim",
+  "model": "bizim (clip-vit-base-patch32/v1)",
+  "boyut": 512,
+  "veri": "CatIndividualImages_hayvan",
+  "birey": 138,
+  "fotograf": 539,
+  "tohum": 42,
+  "saniye_foto": 0.066
+}

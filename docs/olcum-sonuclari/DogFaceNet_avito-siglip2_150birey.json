@@ -1,0 +1,16 @@
+{
+  "top1": 0.8031634446397188,
+  "top5": 0.9173989455184535,
+  "map": 0.7096418655205625,
+  "roc_auc": 0.9824554667071235,
+  "eer": 0.05729532718418221,
+  "sorgu_sayisi": 569,
+  "aday": "avito-siglip2",
+  "model": "C:\\Users\\İbrahim\\Desktop\\Pati Proje\\PATIMATI-AI\\data\\models\\avito-siglip2",
+  "boyut": 768,
+  "veri": "DogFaceNet",
+  "birey": 150,
+  "fotograf": 569,
+  "tohum": 42,
+  "saniye_foto": 0.147
+}
