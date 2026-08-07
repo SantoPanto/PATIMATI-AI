@@ -140,12 +140,35 @@ def compute_final_score(
         raise GecersizEmbedding("her iki tarafta da en az bir fotoğraf olmalı")
 
     visual, foto_a, foto_b = en_iyi_gorsel(a_listesi, b_listesi)
-    label = jaccard_score(labels_a, labels_b)
+    
+    # Özellik ayrımı
+    hard_a = [l for l in labels_a if l.startswith("hard:")]
+    hard_b = [l for l in labels_b if l.startswith("hard:")]
+    soft_a = [l for l in labels_a if l.startswith("soft:")]
+    soft_b = [l for l in labels_b if l.startswith("soft:")]
+    bonus_a = [l for l in labels_a if l.startswith("bonus:")]
+    bonus_b = [l for l in labels_b if l.startswith("bonus:")]
+    
+    hard_score = jaccard_score(hard_a, hard_b)
+    soft_score = jaccard_score(soft_a, soft_b)
+    
+    if not soft_a or not soft_b:
+        label = hard_score
+    else:
+        # Hard özellikler (tür, kürk, kulak) daha önemlidir, soft özellikler (renk, desen) daha az etkilidir.
+        label = (0.7 * hard_score) + (0.3 * soft_score)
+        
     location = location_score(distance_km)
 
     # Kosinüs teorik olarak negatif olabildiği için toplam da [0,1] dışına
     # çıkabilir; skor her zaman yorumlanabilir bir aralıkta kalsın.
     score = (0.55 * visual) + (0.30 * label) + (0.15 * location)
+    
+    # Bonus özellikler uyuşmazsa ceza vermez, eşleşirse +0.02 bonus verir
+    for ba in bonus_a:
+        if ba in bonus_b:
+            score += 0.02
+            
     score = round(min(1.0, max(0.0, score)), 4)
 
     return {

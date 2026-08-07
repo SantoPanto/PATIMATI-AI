@@ -89,6 +89,65 @@ PATTERN_PROMPTS = {
     "bicolor": "a photo of an animal with two-colored patched fur",
 }
 
+# 1. HARD (Kalıcı) Özellikler (Ceza/Eleyici)
+HARD_PROMPTS = {
+    "fur_length": {
+        "keys": ["short_fur", "long_fur", "hairless", "unknown"],
+        "prompts": [
+            "a photo of a pet with short fur hair",
+            "a photo of a pet with long fluffy fur hair",
+            "a photo of a hairless pet",
+            "a blurry photo where fur is not visible"
+        ]
+    },
+    "ear_shape": {
+        "keys": ["pointy_ears", "floppy_ears", "unknown"],
+        "prompts": [
+            "a photo of a pet with pointy straight ears",
+            "a photo of a pet with floppy folded down ears",
+            "a photo of an animal with no ears visible"
+        ]
+    },
+    "tail": {
+        "keys": ["long_tail", "short_tail", "unknown"],
+        "prompts": [
+            "a photo of a pet with a long tail",
+            "a photo of a pet with a short or no tail",
+            "a photo of a pet's face where tail is not visible"
+        ]
+    },
+    "size": {
+        "keys": ["small", "large", "unknown"],
+        "prompts": [
+            "a photo of a small sized pet",
+            "a photo of a large sized pet",
+            "a photo where the pet size cannot be determined"
+        ]
+    }
+}
+
+# 2. SOFT (Geçici) Özellikler (Bonus veren, ceza vermeyen)
+SOFT_PROMPTS = {
+    "collar": {
+        "keys": ["collar", "no_collar", "unknown", "unknown2"],
+        "prompts": [
+            "a photo of a pet wearing a collar around its neck",
+            "a photo of a pet with no collar",
+            "a photo of an animal's face only, no neck visible",
+            "a photo of an unrecognizable object"
+        ]
+    },
+    "ear_tag": {
+        "keys": ["tag", "no_tag", "unknown", "unknown2"],
+        "prompts": [
+            "a photo of a pet with an ear tag",
+            "a photo of a pet with no ear tag",
+            "a photo of an animal with no ears visible",
+            "a photo of an unrecognizable object"
+        ]
+    }
+}
+
 # Sabit renk paleti: iki fotoğrafta AYNI kelimeler üretilsin diye kontrollü sözlük
 PALETTE = {
     "black":  (20, 20, 20),
@@ -138,6 +197,20 @@ class AttributeAnalyzer:
             species: torch.tensor([i for i, (_, s) in enumerate(BREEDS) if s == species])
             for species in ("cat", "dog")
         }
+        
+        self._hard_features = {}
+        for cat, data in HARD_PROMPTS.items():
+            self._hard_features[cat] = {
+                "keys": data["keys"],
+                "feats": embedder.embed_text(data["prompts"])
+            }
+            
+        self._soft_features = {}
+        for cat, data in SOFT_PROMPTS.items():
+            self._soft_features[cat] = {
+                "keys": data["keys"],
+                "feats": embedder.embed_text(data["prompts"])
+            }
 
     def analyze(self, image_bytes: bytes, embedding: list[float] | None = None) -> dict:
         """{labels, species, species_confidence, is_pet, breed, breed_confidence,
@@ -151,12 +224,29 @@ class AttributeAnalyzer:
         breed, breed_conf = self.predict_breed(img_feat, species)
         colors = self._dominant_colors(image_bytes)
 
-        # NOT: cins bilerek labels'a KONMUYOR. Etiketler eşleştirme skorunun %30'unu
-        # oluşturuyor; cins doğruluğu bunu taşıyacak seviyede değil (bkz. ölçüm raporu).
-        labels = [c["name"] for c in colors[:2]]
-        labels.insert(0, pattern)
+        labels = []
+        
+        # Hard Özellikler
         if species != "unknown":
-            labels.insert(0, species)
+            labels.append(f"hard:species_{species}")
+            
+        for cat, data in self._hard_features.items():
+            val, _ = self._classify(img_feat, data["feats"], data["keys"])
+            if "unknown" not in val:
+                labels.append(f"hard:{cat}_{val}")
+                
+        # Soft Özellikler (Renk, Desen)
+        if pattern != "unknown":
+            labels.append(f"soft:pattern_{pattern}")
+            
+        for c in colors[:2]:
+            labels.append(f"soft:color_{c['name']}")
+            
+        # Bonus Özellikler (Tasma, Küpe)
+        for cat, data in self._soft_features.items():
+            val, _ = self._classify(img_feat, data["feats"], data["keys"])
+            if "unknown" not in val:
+                labels.append(f"bonus:{cat}_{val}")
         return {
             "labels": labels,
             "species": species,
