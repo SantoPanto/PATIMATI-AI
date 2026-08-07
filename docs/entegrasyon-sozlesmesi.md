@@ -192,7 +192,7 @@ Python → Java.
 | `analysis.embeddings` | Her fotoğraf için 768 boyutlu, L2-normalize vektör. `ai_embeddings` sütununa yazılır. Sırası `photo_urls` ile aynıdır. |
 | `matches[].photo_a` / `photo_b` | Hangi fotoğraf çiftinin eşleştiği (0 tabanlı indeks). Arayüzde "bu iki fotoğraf benziyor" diye gösterilebilir; hata ayıklamada hangi karenin tuttuğunu söyler. Tür uyuşmazlığında `null`. |
 | `analysis.species` | `cat` \| `dog` \| `unknown`. Güveni düşükse `unknown` döner. |
-| `analysis.is_pet` | `false` → fotoğrafta kedi/köpek görünmüyor (ekran görüntüsü, insan, nesne...). Arayüz kullanıcıdan başka bir fotoğraf isteyebilir. Ölçüm: 111 gerçek hayvan fotoğrafında **0 yanlış reddetme**; gerçek "hayvan olmayan fotoğraf" test kümesi henüz olmadığı için yakalama oranı ölçülmedi, bu yüzden kapı temkinli ayarlandı. |
+| `analysis.is_pet` | `false` → fotoğrafta kedi/köpek görünmüyor (ekran görüntüsü, insan, nesne...). Java bunu `ai_is_pet` sütununa yazar ve `AdResponse` ile arayüze verir; arayüz kullanıcıdan başka bir fotoğraf isteyebilir. **Eleme ölçütü DEĞİLDİR** — aday süzme sorgusuna girmez: kapının yanlış reddetme oranı ölçüldü (111 gerçek hayvan fotoğrafında **0**), ama gerçek "hayvan olmayan fotoğraf" kümesi henüz olmadığı için yakalama oranı ölçülmedi. Ölçülmemiş bir kapıyı eleyici yapmak gerçek bir kayıp hayvan ilanını sessizce havuz dışında bırakabilir. İlan birden çok fotoğraf taşıyorsa **en az biri** hayvan içerdiğinde `true` döner. |
 | `analysis.breed` | Bilgi amaçlı. **Filtre olarak kullanılmaz** (bkz. §7). `is_pet` false ise her zaman `null`. |
 | `matches` | Skora göre azalan sıralı, en fazla 20 kayıt. Aday yoksa boş dizi. |
 | `skipped_candidates` | Elenen adayların gerekçeli sayımı. "Hiç eşleşme çıkmadı" durumunun sebebi görünür olsun diye vardır — özellikle `model_surumu_uyusmuyor` sıfırdan büyükse ilgili ilanların yeniden analiz edilmesi gerekir. |
@@ -288,6 +288,15 @@ private String[] aiLabels;            // ["cat","tabby","brown"]
 
 @Column(name = "ai_species", length = 16)
 private String aiSpecies;             // cat | dog | unknown
+
+// Sarmalayıcı Boolean, ilkel boolean DEĞİL: üç durum var —
+//   null  analiz yapılmadı (PENDING) ya da yapılamadı (FAILED)
+//   true  fotoğrafta hayvan görüldü
+//   false bakıldı, hayvan görünmüyor
+// İlkel tipte, alan mesajda hiç gelmezse Jackson sessizce false yazar ve
+// "AI söylemedi" ile "AI hayvan görmedi" aynı değere düşer.
+@Column(name = "ai_is_pet")
+private Boolean aiIsPet;
 
 @Column(name = "ai_breed", length = 64)
 private String aiBreed;
