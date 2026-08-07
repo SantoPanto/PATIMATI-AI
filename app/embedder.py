@@ -118,8 +118,8 @@ class KimlikGomucu:
     def __init__(self, secim: dict, etiketci: PetEmbedder):
         self.boyut = secim["boyut"]
         # "clip" seçiliyse ikinci bir model yüklemenin anlamı yok
-        self._clip_mi = secim["kimlik"] == etiketci.MODEL_ID
-        if self._clip_mi:
+        self.clip_mi = secim["kimlik"] == etiketci.MODEL_ID
+        if self.clip_mi:
             self._etiketci = etiketci
             logger.info("Kimlik vektörü etiketçi CLIP'ten alınacak (ek model yok).")
             return
@@ -185,7 +185,7 @@ class KimlikGomucu:
         return model
 
     def embed_bytes(self, image_bytes: bytes) -> list[float]:
-        if self._clip_mi:
+        if self.clip_mi:
             return self._etiketci.embed_bytes(image_bytes)
         return self._embed_pil(goruntu_ac(image_bytes))
 

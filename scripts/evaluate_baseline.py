@@ -75,6 +75,25 @@ class _ImageOnlyDataset(Dataset):
         return self.processor(images=image, return_tensors="pt")["pixel_values"][0]
 
 
+def load_model(model_name: str) -> torch.nn.Module:
+    """`AutoModel.from_pretrained` ağırlıklar eksik/uyuşmayan yüklenirse yalnızca
+    UYARI basar, model RASTGELE değerlerle çalışmaya devam eder — sessizce çöp
+    embedding üretmek demektir. Aynı sınıf hata `app/embedder.py`deki
+    `KimlikGomucu`de 2026-07-27'de gerçekten yaşandı (bkz. oradaki not).
+    `--model-name` serbest bir CLI argümanı olduğu için burada da kontrol edilir;
+    rastgele ağırlıkla ölçülen bir baseline, gerçek olmayan bir kıyas noktası
+    üretip fine-tuning'in kazancını yanlış değerlendirir."""
+    model, bilgi = AutoModel.from_pretrained(model_name, output_loading_info=True)
+    eksik = bilgi.get("missing_keys") or []
+    uyusmayan = bilgi.get("mismatched_keys") or []
+    if eksik or uyusmayan:
+        raise RuntimeError(
+            f"{model_name}: ağırlıklar tam yüklenmedi ({len(eksik)} eksik, "
+            f"{len(uyusmayan)} uyuşmayan). Rastgele ağırlıkla baseline ölçmek "
+            f"anlamsız olacağından durduruldu.")
+    return model
+
+
 def extract_features(model, pixel_values: torch.Tensor) -> torch.Tensor:
     features = model.get_image_features(pixel_values=pixel_values)
     # transformers 4.x düz tensor, 5.x çıktı nesnesi döndürebiliyor (bkz. app/embedder.py).
@@ -174,7 +193,7 @@ def main() -> None:
         return
 
     processor = AutoProcessor.from_pretrained(args.model_name)
-    model = AutoModel.from_pretrained(args.model_name)
+    model = load_model(args.model_name)
     model.eval()
     model.to(device)
 

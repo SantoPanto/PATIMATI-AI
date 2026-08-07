@@ -33,7 +33,10 @@ app = FastAPI(title="PatiMati AI Service", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv("ALLOWED_ORIGINS", "*")],
+    # Virgülle ayrılmış birden fazla origin desteklenir (ör. prod + staging).
+    # Tek elemanlı liste yazılsaydı CORSMiddleware tüm string'i TEK bir origin
+    # sanır, virgülden sonraki hiçbir origin asla eşleşmezdi.
+    allow_origins=[o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",") if o.strip()],
     allow_methods=["*"], allow_headers=["*"],
 )
 
@@ -49,18 +52,21 @@ async def health():
             "model_version": MODEL_SURUMU}
 
 
-def _oznitelik_cikar(img_bytes: bytes) -> dict:
+def _oznitelik_cikar(img_bytes: bytes, embedding: list[float] | None) -> dict:
     """Öznitelikleri çıkarır; hata olursa boş etiketlerle devam eder.
 
     Embedding zaten hesaplandığı için eşleştirme etiketsiz de çalışır —
     öznitelik hatası tüm analizi düşürmemeli.
 
-    Kimlik vektörü buraya GEÇİRİLMEZ: kimlik modeli CLIP'ten farklıysa vektör
-    başka bir uzayda olur ve zero-shot metin karşılaştırması sessizce yanlış
-    etiket üretir. attribute_analyzer kendi CLIP vektörünü hesaplar.
+    `embedding` YALNIZCA kimlik modeli CLIP'in kendisiyse geçirilir (bkz.
+    `_goruntuyu_isle`): o zaman ikisi aynı uzaydadır ve CLIP'i aynı fotoğraf
+    için ikinci kez çalıştırmak anlamsızdır. Aksi halde None geçirilir ve
+    attribute_analyzer kendi CLIP vektörünü hesaplar — kimlik modeli farklıysa
+    (ör. SigLIP2) vektör başka bir uzayda olur ve zero-shot metin
+    karşılaştırması sessizce yanlış etiket üretir.
     """
     try:
-        return attribute_analyzer.analyze(img_bytes)
+        return attribute_analyzer.analyze(img_bytes, embedding=embedding)
     except Exception as e:
         logger.error(f"Öznitelik çıkarma hatası (etiketsiz devam ediliyor): {e}")
         return {"labels": [], "species": "unknown", "species_confidence": 0.0,
@@ -84,7 +90,8 @@ async def _goruntuyu_isle(img_bytes: bytes) -> tuple[list[float], dict]:
         logger.error(f"Embedding hatası: {e}")
         raise HTTPException(500, "Analiz sırasında hata oluştu.")
 
-    vision = await run_in_threadpool(_oznitelik_cikar, img_bytes)
+    onceden_hesaplanan = embedding if kimlik_gomucu.clip_mi else None
+    vision = await run_in_threadpool(_oznitelik_cikar, img_bytes, onceden_hesaplanan)
     return embedding, vision
 
 

@@ -173,7 +173,7 @@ class SigLIP2VisionBackbone(torch.nn.Module):
     def __init__(self, model_name: str) -> None:
         super().__init__()
         self.processor = AutoProcessor.from_pretrained(model_name)
-        self.model = AutoModel.from_pretrained(model_name)
+        self.model = self._yukle_ve_dogrula(model_name)
         for param in self.model.parameters():
             param.requires_grad = False
         for _, param in self.vision_named_parameters():
@@ -182,6 +182,25 @@ class SigLIP2VisionBackbone(torch.nn.Module):
             dummy_pixel_values = torch.zeros(1, 3, 224, 224)
             dummy_features = self._extract_features(dummy_pixel_values)
         self.num_features = dummy_features.shape[-1]
+
+    @staticmethod
+    def _yukle_ve_dogrula(model_name: str) -> torch.nn.Module:
+        """`AutoModel.from_pretrained` ağırlıklar eksik/uyuşmayan yüklenirse yalnızca
+        UYARI basar, model RASTGELE değerlerle çalışmaya devam eder — sessizce çöp
+        embedding üretmek demektir. Aynı sınıf hata `app/embedder.py`deki
+        `KimlikGomucu`de 2026-07-27'de gerçekten yaşandı (bkz. oradaki not).
+        `--model-name` serbest bir CLI argümanı olduğu için burada da kontrol
+        edilir; rastgele ağırlıkla fine-tune etmek saatler süren bir eğitimi
+        anlamsız hale getirir."""
+        model, bilgi = AutoModel.from_pretrained(model_name, output_loading_info=True)
+        eksik = bilgi.get("missing_keys") or []
+        uyusmayan = bilgi.get("mismatched_keys") or []
+        if eksik or uyusmayan:
+            raise RuntimeError(
+                f"{model_name}: ağırlıklar tam yüklenmedi ({len(eksik)} eksik, "
+                f"{len(uyusmayan)} uyuşmayan). Rastgele ağırlıkla fine-tune etmek "
+                f"anlamsız olacağından durduruldu.")
+        return model
 
     def _extract_features(self, pixel_values: torch.Tensor) -> torch.Tensor:
         features = self.model.get_image_features(pixel_values=pixel_values)

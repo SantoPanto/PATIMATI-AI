@@ -35,11 +35,14 @@ def baytlari_analiz_et(fotograflar: list[bytes],
             continue
         embeddings.append(emb)
         try:
-            # Kimlik vektörü etiket analizine GEÇİRİLMEZ. Kimlik modeli CLIP'ten
-            # farklıysa vektör başka bir uzayda olur ve zero-shot metin
-            # karşılaştırması anlamsız sonuç verir — sessizce yanlış etiket üretir.
-            # attribute_analyzer kendi CLIP vektörünü hesaplasın.
-            oznitelikler.append(attribute_analyzer.analyze(ham))
+            # Kimlik vektörü YALNIZCA kimlik modeli CLIP'in kendisiyse etiket
+            # analizine geçirilir: o zaman ikisi aynı uzaydadır ve CLIP'i aynı
+            # fotoğraf için ikinci kez çalıştırmak anlamsız olur. Kimlik modeli
+            # farklıysa (ör. SigLIP2) vektör başka bir uzayda olur ve zero-shot
+            # metin karşılaştırması anlamsız sonuç verir — bu durumda
+            # attribute_analyzer kendi CLIP vektörünü hesaplar (embedding=None).
+            onceden_hesaplanan = emb if kimlik_gomucu.clip_mi else None
+            oznitelikler.append(attribute_analyzer.analyze(ham, embedding=onceden_hesaplanan))
         except Exception as e:
             # Öznitelik hatası embedding'i çöpe atmamalı: eşleştirme etiketsiz
             # de çalışır, sadece skorun etiket bileşeni sıfırlanır.
