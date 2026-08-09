@@ -245,7 +245,7 @@ class AttributeAnalyzer:
         # Bonus Özellikler (Tasma, Küpe)
         for cat, data in self._soft_features.items():
             val, _ = self._classify(img_feat, data["feats"], data["keys"])
-            if "unknown" not in val:
+            if "unknown" not in val and not val.startswith("no_"):
                 labels.append(f"bonus:{cat}_{val}")
         return {
             "labels": labels,

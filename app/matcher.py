@@ -141,6 +141,25 @@ def compute_final_score(
 
     visual, foto_a, foto_b = en_iyi_gorsel(a_listesi, b_listesi)
     
+    # Geriye dönük uyumluluk (Backward Compatibility): Eski öneksiz etiketleri (örn. "cat", "tabby") yeni formata çevir.
+    def _migrate(lbls):
+        migrated = []
+        for l in lbls:
+            if ":" in l:
+                migrated.append(l)
+            elif l in {"cat", "dog"}:
+                migrated.append(f"hard:species_{l}")
+            elif l in {"tabby", "spotted", "solid", "bicolor"}:
+                migrated.append(f"soft:pattern_{l}")
+            elif l in {"black", "white", "gray", "brown", "orange", "cream", "golden"}:
+                migrated.append(f"soft:color_{l}")
+            else:
+                migrated.append(l) # Bilinmeyen eski etiketleri aynen bırak
+        return migrated
+
+    labels_a = _migrate(labels_a)
+    labels_b = _migrate(labels_b)
+    
     # Özellik ayrımı
     hard_a = [l for l in labels_a if l.startswith("hard:")]
     hard_b = [l for l in labels_b if l.startswith("hard:")]
