@@ -193,34 +193,27 @@ bireyler içeren bir kümeyle verilecek (`wildlife-datasets` → `CatIndividualI
 **Bu yüzden `MatchCandidate.embeddings` bir listedir ve sözleşme ilan başına
 birden çok fotoğraf zorunlu kılar.**
 
-### 4.1. Açık Küme Eşik Taraması (Çift Yönlü TPR ve FPR Analizi)
+### 4.1. Açık Küme Eşik Taraması (Gerçek Motor ve "Data Leakage" Önlemi)
 
-**Amaç:** Açık küme (open-set) senaryosunda sadece yanlış alarmları (FPR) değil, sistemin gerçek eşleşmeleri yakalama oranını (TPR) da ölçmek. Ayrıca "ham görsel skora" karşı, konum ve etiket bilgisini içeren "hibrit skorun" ayrım gücünü kıyaslamak.
+**Amaç:** Açık küme TPR/FPR analizini yapay varsayımlardan arındırarak, doğrudan ürünün canlıdaki eşleştirme motoru olan `app.matcher.compute_final_score` üzerinden, gerçekçi (kör/blind) verilerle test etmek.
 
 **Metodoloji:**
-Veri seti 3 gruba ayrılmıştır:
-* **Galeri:** 50 farklı kayıtlı kimlik (hayvan başına 1 fotoğraf).
-* **Gerçek Eşleşmeler (TPR):** Galerideki hayvanların farklı günlerde çekilmiş 98 fotoğrafı (Pozitif Sorgu).
-* **Yanlış Alarmlar (FPR):** Sisteme tamamen yabancı 50 farklı hayvanın 149 fotoğrafı (Negatif Sorgu).
-* **Hibrit Skor Senaryosu (Kötü Durum):** Yabancı bir kedi eşleşmesinde en zorlu senaryo simüle edilmiştir: "Aynı şehirde yaşayan iki benzer tekir kedi" varsayımı ile Etiket Skoru = 1.0, Konum Skoru = 0.80 olarak sabitlenmiştir. Gerçek eşleşmelerde ise ikisi de 1.0 alınmıştır.
+* Testte "Data Leakage" (Veri sızıntısı) tamamen engellenmiştir. Motor, fotoğrafların aynı hayvana ait olup olmadığını (ground truth) bilmeden kör test yapmıştır.
+* **Girdiler:** Canlı sistem davranışını yansıtması için etiket Jaccard örtüşmesi 0.1667 (gerçek CLIP davranış ortalaması) ve konum mesafesi 5.0 km olarak sisteme verilmiştir.
 
-**Bulgular:**
+**Bulgular (Gerçek Motor Çıktısı):**
 
-| Eşik | Ham Görsel (FPR) | Ham Görsel (TPR) | Hibrit Skor (FPR) | Hibrit Skor (TPR) |
-|---|---|---|---|---|
-| 0.70 | %100.0 | %98.0 | %100.0 | %100.0 |
-| 0.80 | %100.0 | %98.0 | %100.0 | %98.0 |
-| 0.90 | %88.6 | %96.9 | %98.0 | %98.0 |
-| **0.95** | **%24.2** | **%90.8** | **%4.0** | **%95.9** |
+| Eşik | Ham Görsel Skor (TPR) | Hibrit Skor - app.matcher (TPR) |
+|---|---|---|
+| 0.60 | %100.0 | %98.0 |
+| **0.65** | %98.0 | **%84.7** |
+| **0.70** | %98.0 | **%0.0 (Sistem Çöküşü)** |
+| 0.95 | %90.8 | %0.0 |
 
-*(Not: Tablo okunabilirliği için kritik kırılma noktaları bırakılmıştır. Kapsamlı tarama 0.50-0.95 aralığında `scripts/eslesme_yok_testi.py` betiği ile tekrarlanabilir.)*
-
-**Sonuç ve Teknik Çıkarım:**
-1. **Dağılımın Kayması:** Ham görsel benzerlik tek başına kullanıldığında, SigLIP2 mimarisinin doğası gereği yabancı hayvanlar galeridekilere çok yüksek oranda benzemektedir (0.80 eşiğinde bile FPR %100).
-2. **Hibrit Skorun İspatı:** Konum ve etiket faktörleri eklendiğinde sistemin taban puanları yukarı kaysa da, eşik **0.95 seviyesine çekildiğinde** hibrit formülün muazzam bir ayrım gücü yarattığı görülmektedir. 
-3. **Karar:** 0.95 eşiğinde Ham Görsel Skor %24.2 gibi yüksek bir yanlış alarm verirken ve TPR'yi %90.8'e düşürürken; Hibrit Skor hatayı **%4.0** seviyesine kadar bastırmakta ve gerçek eşleşme yakalama oranını (TPR) **%95.9** gibi son derece güvenilir bir seviyede tutmaktadır. Bildirim tetikleme mimarisinin doğrudan hibrit skora dayandırılması gerektiği istatistiksel olarak doğrulanmıştır.
-
----
+**Sonuç ve Kritik Çıkarım:**
+1. **Hibrit Skor Tavanı:** Önceki varsayımsal testlerin aksine, gerçek motor kullanıldığında etiket örtüşmesinin doğal düşüklüğü (~0.1667) ve mesafe cezası, final hibrit skoru inanılmaz derecede aşağı çekmektedir.
+2. **0.95 Eşiği İmkansızlığı:** Canlı sistemde hibrit skorun 0.70 seviyesine bile ulaşması matematiksel olarak neredeyse imkansızdır. Eşiğin 0.95'e ayarlanması, uygulamanın hiçbir gerçek eşleşmeyi bulamamasına (TPR %0.0) yol açacaktır.
+3. **Aksiyon Önerisi:** Bildirim eşiğinin `0.95` olarak bırakılması ürünü tamamen işlevsiz kılacaktır. Ya hibrit formüldeki ağırlıklar (Görsel %55, Etiket %30, Konum %15) acilen yeniden kalibre edilmeli ya da canlı sistem bildirim eşiği `0.60 - 0.65` bandına kadar düşürülmelidir.
 
 ## 5. Bulguların tasarıma etkisi
 
