@@ -6,15 +6,18 @@ Sentence-Transformers (vektörel gömme / text embedding) kullanarak hesaplar.
 
 from sentence_transformers import SentenceTransformer, util
 import torch
+from .extractor import PatiMatiTextExtractor
 
 
 class TextMatcher:
     def __init__(self, model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"):
         """
         Türkçe ve çoklu dil desteği olan anlamsal gömme (semantic embedding) modelini yükler.
+        Ayrıca metinlerden yapısal öznitelik çıkarmak için çıkarıcıyı başlatır.
         """
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model = SentenceTransformer(model_name, device=self.device)
+        self.extractor = PatiMatiTextExtractor()
 
     def get_embedding(self, text: str):
         """
@@ -39,6 +42,12 @@ class TextMatcher:
         
         return max(0.0, min(1.0, skor))
 
+    def extract_text_features(self, text: str) -> dict:
+        """
+        İlan metninden kural tabanlı öznitelikleri (tür, detay ırk, tasma, kulak durumu vb.) çıkarır.
+        """
+        return self.extractor.extract_features(text)
+
 
 if __name__ == "__main__":
     print("🤖 Model yükleniyor ve test ediliyor...")
@@ -48,4 +57,7 @@ if __name__ == "__main__":
     ilan_bulundu = "Sol kulağında çentik olan siyah renkli tekir kedi bulundu. Mavi tasması bulunuyor."
 
     skor = matcher.calculate_similarity(ilan_kayip, ilan_bulundu)
+    features = matcher.extract_text_features(ilan_kayip)
+    
     print(f"\n✅ Benzerlik Skoru: %{skor * 100:.2f}")
+    print(f"🔍 Çıkarılan Özellikler: {features}")
