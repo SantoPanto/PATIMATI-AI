@@ -1,0 +1,62 @@
+name: CI
+
+# Neden var: bu depoda testler yalnızca elle koşuluyordu ve bir PR'da kırık kalan
+# bir test (test_perfect_match) kimsenin gözüne çarpmadan main'e kadar geldi.
+# Backend deposunda CI vardı, burada yoktu. Amaç tam olarak bunu engellemek.
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    env:
+      # Kimlik modelini AÇIKÇA sabitliyoruz. tests/conftest.py zaten setdefault ile
+      # "clip" koyuyor ama burada tekrar yazmak iki işe yarıyor: (1) koşumun hangi
+      # yapılandırmayı sınadığı log'a bakmadan görünür, (2) conftest'teki varsayılan
+      # ileride değişirse CI sessizce 1,4 GB'lık SigLIP2 ağırlığını indirmeye başlamaz.
+      # Üretim siglip2-animal ile çalışıyor; buradaki yeşil, üretim modelinin
+      # doğruluğunu DEĞİL kodun sağlamlığını gösterir.
+      KIMLIK_MODEL: clip
+      # app/indirici.py bu değişkeni içe aktarma anında okuyor. Boş bırakılmazsa
+      # "yerel adresler reddedilir" (SSRF) testleri yanlış yönde kırılır.
+      PHOTO_ALLOWED_HOSTS: ""
+
+    steps:
+      - name: Repoyu klonla
+        uses: actions/checkout@v4
+
+      - name: Python 3.11 kurulumu
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"   # Dockerfile ile aynı taban
+          cache: pip
+
+      - name: HuggingFace önbelleği
+        # CLIP ağırlıkları (~600 MB) app/embedder.py içe aktarılır aktarılmaz
+        # iniyor. Önbelleğe alınmazsa her koşumda yeniden inerdi.
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-clip-vit-base-patch32-v1
+
+      - name: Bağımlılıklar
+        # torch AYRI ve ÖNCE kuruluyor: PyPI'daki Linux torch'u CUDA yapısı (~2,5 GB),
+        # bize CPU yapısı yetiyor. Sürümler requirements.txt ile birebir aynı olduğu
+        # için ikinci komut torch'u yeniden kurmaz. (Aynı reçete requirements.txt
+        # başındaki notta yazıyor.)
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch==2.13.0 torchvision==0.28.0 --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - name: Testler
+        # -ra: ATLANAN testlerin gerekçesi çıktıya yazılır. Bu önemli —
+        # tests/seed_data/ depoda değil (Oxford-IIIT Pet, ~800 MB, KVKK'dan bağımsız
+        # olarak ağır) ve ona bağlı testler sessizce atlanıyor. "Hepsi yeşil"
+        # görüntüsü, atlananlar görünmezse yanıltıcı olur.
+        run: pytest tests/ -ra -q
