@@ -24,3 +24,12 @@ def test_low_similarity(matcher):
 def test_empty_input(matcher):
     with pytest.raises(ValueError):
         matcher.calculate_similarity("", "Siyah kedi")
+
+
+# --- Yeni Eklenen Özellik Çıkarma Testi ---
+def test_extract_text_features(matcher):
+    ilan = "Sokakta geziyordu, siyah kedicik, tasması yok."
+    features = matcher.extract_text_features(ilan)
+    
+    assert features["tur"] == "kedi"
+    assert features["tasma"] == "yok"
