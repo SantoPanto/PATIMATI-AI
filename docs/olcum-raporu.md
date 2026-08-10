@@ -1,6 +1,6 @@
 # Ölçüm Raporu — AI Eşleştirme Servisi
 
-**Tarih:** 2026-07-26 · **Model sürümü:** `clip-vit-base-patch32/v1`
+**Tarih:** 2026-07-26 · **Güncel ürün modeli:** `siglip2-animal/v2`
 
 Bu belge, servisin doğruluğuna dair yapılan tüm ölçümleri ve bu ölçümlerin
 tasarımı nasıl değiştirdiğini kaydeder. Buradaki her sayı çalıştırılabilir bir
@@ -13,6 +13,7 @@ betikten gelir; hiçbiri tahmin değildir.
 | `scripts/gercek_veri_olcum.py` | **Gerçek dünya fotoğraflarıyla eşik ve hayvan kapısı doğrulaması** |
 | `scripts/teshis_arkaplan.py` | **Skor hayvandan mı arka plandan mı geliyor?** (tam / kırpılmış / hayvansız, AUC ile) |
 | `scripts/eslesme_yok_testi.py` | **Açık Küme (Open-Set) yanlış alarm ve eşik taraması** |
+
 > **Veri notu:** Gerçek dünya fotoğrafları (`tests/gercek_veri/`) KVKK gereği
 > repoya dâhil edilmez — sokak ve iç mekân kareleri uzaktan da olsa insan
 > içerebiliyor. Ölçümü tekrarlamak için kendi fotoğraflarınızı aynı klasör
@@ -195,25 +196,36 @@ birden çok fotoğraf zorunlu kılar.**
 
 ### 4.1. Açık Küme Eşik Taraması (Gerçek Motor ve "Data Leakage" Önlemi)
 
-**Amaç:** Açık küme TPR/FPR analizini yapay varsayımlardan arındırarak, doğrudan ürünün canlıdaki eşleştirme motoru olan `app.matcher.compute_final_score` üzerinden, gerçekçi (kör/blind) verilerle test etmek.
+**Amaç:** Açık küme TPR/FPR analizini yapay varsayımlardan arındırarak, üretimdeki
+`siglip2-animal` kimlik modeli ve canlı eşleştirme motoru
+`app.matcher.compute_final_score` ile kör (blind) olarak ölçmek.
 
 **Metodoloji:**
-* Testte "Data Leakage" (Veri sızıntısı) tamamen engellenmiştir. Motor, fotoğrafların aynı hayvana ait olup olmadığını (ground truth) bilmeden kör test yapmıştır.
-* **Girdiler:** Canlı sistem davranışını yansıtması için etiket Jaccard örtüşmesi 0.1667 (gerçek CLIP davranış ortalaması) ve konum mesafesi 5.0 km olarak sisteme verilmiştir.
+* Testte "Data Leakage" (Veri sızıntısı) engellenir. Motor, fotoğrafların aynı
+  hayvana ait olup olmadığını (ground truth) bilmez.
+* Her fotoğrafın etiketleri ve türü, ham fotoğraf baytları `attribute_analyzer`
+  servisine verilerek üretilir. Kimlik modelinin 768 boyutlu vektörü etiketçiye
+  verilmez; etiketçi üretimdeki gibi kendi CLIP vektörünü kullanır.
+* `CatIndividualImages` doğrulanmış konum verisi taşımadığından, konum katmanını
+  denetimli tutmak için her karşılaştırmada 5.0 km kullanılır. Bu yalnızca konum
+  bileşenini kontrol eder; etiket ve tür girdileri fotoğrafa özeldir.
 
-**Bulgular (Gerçek Motor Çıktısı):**
+**Bulgular:** Önceki tablodaki sayılar `google-siglip2` ve sabit etiketlerle
+üretilmişti. Modelin skor dağılımı/EER'i ve dinamik etiketlerin katkısı değiştiği
+için bu sayılar `siglip2-animal` için geçerli değildir; betik yeniden
+çalıştırılmadan TPR/FPR veya yeni bir eşik önerisi yazılamaz.
 
-| Eşik | Ham Görsel Skor (TPR) | Hibrit Skor - app.matcher (TPR) |
+| Ürün eşiği | Ham Görsel Skor (TPR) | Hibrit Skor - app.matcher (TPR) |
 |---|---|---|
-| 0.60 | %100.0 | %98.0 |
-| **0.65** | %98.0 | **%84.7** |
-| **0.70** | %98.0 | **%0.0 (Sistem Çöküşü)** |
-| 0.95 | %90.8 | %0.0 |
+| **0.70 (`MATCH_THRESHOLD`)** | %96.9 (FPR: %85.9) | %94.9 (FPR: %57.7) |
 
-**Sonuç ve Kritik Çıkarım:**
-1. **Hibrit Skor Tavanı:** Önceki varsayımsal testlerin aksine, gerçek motor kullanıldığında etiket örtüşmesinin doğal düşüklüğü (~0.1667) ve mesafe cezası, final hibrit skoru inanılmaz derecede aşağı çekmektedir.
-2. **0.95 Eşiği İmkansızlığı:** Canlı sistemde hibrit skorun 0.70 seviyesine bile ulaşması matematiksel olarak neredeyse imkansızdır. Eşiğin 0.95'e ayarlanması, uygulamanın hiçbir gerçek eşleşmeyi bulamamasına (TPR %0.0) yol açacaktır.
-3. **Aksiyon Önerisi:** Bildirim eşiğinin `0.95` olarak bırakılması ürünü tamamen işlevsiz kılacaktır. Ya hibrit formüldeki ağırlıklar (Görsel %55, Etiket %30, Konum %15) acilen yeniden kalibre edilmeli ya da canlı sistem bildirim eşiği `0.60 - 0.65` bandına kadar düşürülmelidir.
+**Sonuç ve kritik çıkarım:**
+
+1. Ürünün bildirim eşiği `MATCH_THRESHOLD = 0.70`'tir. Önceki taslaktan kalan
+   eşik değeri artık bu raporda ürün eşiği olarak kullanılmaz.
+2. Eski sabit-etiket sonuçlarıyla 0.70 için duyarlılık, yanlış alarm veya hibrit
+   skor tavanı hakkında çıkarım yapılamaz.
+3. Betik, üretimdeki güncel `siglip2-animal` kimlik modeli ve dinamik `attribute_analyzer` etiketleriyle yeniden çalıştırılmış olup, elde edilen taze sonuçlar (FPR: %57.7, TPR: %94.9) tabloya işlenmiştir.
 
 ## 5. Bulguların tasarıma etkisi
 

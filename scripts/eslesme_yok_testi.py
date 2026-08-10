@@ -8,26 +8,21 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 VERI_ADI = "CatIndividualImages"
-MODEL_ANAHTARI = "google-siglip2"
+MODEL_ANAHTARI = "siglip2-animal"
 TOHUM = 42
 BIREY_SAYISI = 100
 FOTO_SAYISI = 3
+KONTROL_MESAFESI_KM = 5.0
 
 # compute_final_score embedding boyutunu app.surum uzerinden dogrular.
-# Bu test google-siglip2 vektorleri urettigi icin matcher'i ayni kimlik
+# Bu test siglip2-animal vektorleri urettigi icin matcher'i ayni kimlik
 # modeliyle yukluyoruz.
 os.environ["KIMLIK_MODEL"] = MODEL_ANAHTARI
 
+from app.attributes import attribute_analyzer  # noqa: E402
+from app.embedder import kimlik_gomucu  # noqa: E402
 from app.matcher import compute_final_score  # noqa: E402
-from scripts.model_yarisi import gomucu_kur, veri_yukle  # noqa: E402
-
-
-# Skorlayiciya verilen etiket/konum girdileri kor sabittir; ayni kedi olup
-# olmadigina gore degismez. Etiketler 1/6 Jaccard = 0.1667 uretir.
-KOR_ETIKETLER_A = ["cat"]
-KOR_ETIKETLER_B = ["cat", "tabby", "short_hair", "green_eyes", "adult", "outdoor"]
-KOR_MESAFE_KM = 5.0
-KOR_TUR = "cat"
+from scripts.model_yarisi import veri_yukle  # noqa: E402
 
 
 def kimlikleri_bol(kimlikler, tohum):
@@ -90,26 +85,62 @@ def vektor_listeye_cevir(vektor):
     return np.asarray(vektor, dtype=np.float32).tolist()
 
 
-def motor_sonucu_hesapla(sorgu_vektoru, galeri_vektoru):
-    """Gercek urun motorunu kor etiket/konum girdileriyle cagirir."""
+def fotograflari_analiz_et(yollar):
+    """Her fotograf icin uretimdeki kimlik vektorunu ve etiketleri uretir.
+
+    Kimlik modeli siglip2-animal 768 boyutlu vektor uretir; attribute_analyzer
+    ise etiketleri kendi CLIP vektoruyle cikarir. Bu nedenle kimlik vektoru
+    analyze'a verilmez.
+    """
+    vektorler = []
+    oznitelikler = []
+    for yol in yollar:
+        image_bytes = Path(yol).read_bytes()
+        vektorler.append(kimlik_gomucu.embed_bytes(image_bytes))
+        oznitelikler.append(attribute_analyzer.analyze(image_bytes))
+    return np.asarray(vektorler, dtype=np.float32), oznitelikler
+
+
+def motor_sonucu_hesapla(
+    sorgu_vektoru,
+    galeri_vektoru,
+    sorgu_oznitelikleri,
+    galeri_oznitelikleri,
+):
+    """Gercek urun motorunu foto-grafa ozel etiket ve turlerle cagirir."""
     return compute_final_score(
         embeddings_a=vektor_listeye_cevir(sorgu_vektoru),
         embeddings_b=vektor_listeye_cevir(galeri_vektoru),
-        labels_a=KOR_ETIKETLER_A,
-        labels_b=KOR_ETIKETLER_B,
-        distance_km=KOR_MESAFE_KM,
-        species_a=KOR_TUR,
-        species_b=KOR_TUR,
+        labels_a=sorgu_oznitelikleri["labels"],
+        labels_b=galeri_oznitelikleri["labels"],
+        # CatIndividualImages konum verisi tasimiyor. Konum katmanini
+        # denetimli tutmak icin ayni mesafe tum karsilastirmalarda kullanilir;
+        # etiket ve tur girdileri ise her fotograf icin gercektir.
+        distance_km=KONTROL_MESAFESI_KM,
+        species_a=sorgu_oznitelikleri["species"],
+        species_b=galeri_oznitelikleri["species"],
     )
 
 
-def tum_galeri_skorlari_hesapla(sorgu_vektoru, galeri_vektorleri):
+def tum_galeri_skorlari_hesapla(
+    sorgu_vektoru,
+    sorgu_oznitelikleri,
+    galeri_vektorleri,
+    galeri_oznitelikleri,
+):
     """Bir sorguyu galerideki tum adaylara karsi gercek motorla skorlar."""
     ham_gorsel_skorlar = []
     hibrit_skorlar = []
 
-    for galeri_vektoru in galeri_vektorleri:
-        sonuc = motor_sonucu_hesapla(sorgu_vektoru, galeri_vektoru)
+    for galeri_vektoru, galeri_ozniteligi in zip(
+        galeri_vektorleri, galeri_oznitelikleri
+    ):
+        sonuc = motor_sonucu_hesapla(
+            sorgu_vektoru,
+            galeri_vektoru,
+            sorgu_oznitelikleri,
+            galeri_ozniteligi,
+        )
         ham_gorsel_skorlar.append(float(sonuc["visual"]))
         hibrit_skorlar.append(float(sonuc["score"]))
 
@@ -119,9 +150,17 @@ def tum_galeri_skorlari_hesapla(sorgu_vektoru, galeri_vektorleri):
     )
 
 
-def skor_dagilimlarini_hesapla(vektorler, kimlikler, galeri_idx, pozitif_idx, negatif_idx):
+def skor_dagilimlarini_hesapla(
+    vektorler,
+    oznitelikler,
+    kimlikler,
+    galeri_idx,
+    pozitif_idx,
+    negatif_idx,
+):
     """Pozitif/negatif ham gorsel ve gercek motor hibrit skorlarini hesaplar."""
     galeri_vektorleri = vektorler[galeri_idx]
+    galeri_oznitelikleri = [oznitelikler[idx] for idx in galeri_idx]
     galeri_kimlikleri = kimlikler[galeri_idx]
     galeri_sirasi = {kimlik: i for i, kimlik in enumerate(galeri_kimlikleri)}
 
@@ -138,7 +177,12 @@ def skor_dagilimlarini_hesapla(vektorler, kimlikler, galeri_idx, pozitif_idx, ne
             raise ValueError(f"Pozitif sorgu icin galeride kimlik bulunamadi: {kimlik}")
 
         galeri_sira = galeri_sirasi[kimlik]
-        sonuc = motor_sonucu_hesapla(vektorler[sorgu_idx], galeri_vektorleri[galeri_sira])
+        sonuc = motor_sonucu_hesapla(
+            vektorler[sorgu_idx],
+            galeri_vektorleri[galeri_sira],
+            oznitelikler[sorgu_idx],
+            galeri_oznitelikleri[galeri_sira],
+        )
         pozitif_ham_skorlar.append(float(sonuc["visual"]))
         pozitif_hibrit_skorlar.append(float(sonuc["score"]))
 
@@ -146,7 +190,10 @@ def skor_dagilimlarini_hesapla(vektorler, kimlikler, galeri_idx, pozitif_idx, ne
     # yabanci fotografin tum galeriyle skorlarindan maksimum olanlari.
     for sorgu_idx in negatif_idx:
         ham_skorlar, hibrit_skorlar = tum_galeri_skorlari_hesapla(
-            vektorler[sorgu_idx], galeri_vektorleri
+            vektorler[sorgu_idx],
+            oznitelikler[sorgu_idx],
+            galeri_vektorleri,
+            galeri_oznitelikleri,
         )
         negatif_ham_skorlar.append(float(np.max(ham_skorlar)))
         negatif_hibrit_skorlar.append(float(np.max(hibrit_skorlar)))
@@ -221,23 +268,29 @@ def main():
     print(f"Galeri fotografi: {len(galeri_idx)}")
     print(f"Pozitif sorgu fotografi (TPR): {len(pozitif_idx)}")
     print(f"Negatif sorgu fotografi (FPR): {len(negatif_idx)}")
-    print("Gercek motor girdileri: etiket Jaccard 1/6 (0.1667), "
-          f"konum mesafesi {KOR_MESAFE_KM:.1f} km; ikisi de kor sabit.")
+    print("Gercek motor girdileri: etiketler ve turler her fotograf icin "
+          "attribute_analyzer ile uretilir; "
+          f"kontrol mesafesi {KONTROL_MESAFESI_KM:.1f} km.")
 
-    # 3) Tum fotograflari bir kez vektore cevir; sonra skorlar urun motorunun
-    # compute_final_score fonksiyonuyla hesaplanir.
+    # 3) Her fotoğrafı üretimdeki kimlik gömücüsü ve etiketçiyle analiz et;
+    # sonra skorları ürün motorunun compute_final_score fonksiyonuyla hesapla.
     print(f"\nModel yukleniyor: {MODEL_ANAHTARI}...")
-    gomucu = gomucu_kur(MODEL_ANAHTARI)
-
-    print("Fotograflar vektore cevriliyor...")
-    vektorler = gomucu.kodla(yollar)
+    print("Fotograflar vektore cevriliyor ve etiketleniyor...")
+    vektorler, oznitelikler = fotograflari_analiz_et(yollar)
 
     (
         pozitif_ham_skorlar,
         negatif_ham_skorlar,
         pozitif_hibrit_skorlar,
         negatif_hibrit_skorlar,
-    ) = skor_dagilimlarini_hesapla(vektorler, kimlikler, galeri_idx, pozitif_idx, negatif_idx)
+    ) = skor_dagilimlarini_hesapla(
+        vektorler,
+        oznitelikler,
+        kimlikler,
+        galeri_idx,
+        pozitif_idx,
+        negatif_idx,
+    )
 
     # 4) Iki ayri esik taramasi: biri yalnizca ham gorsel skor, digeri gercek
     # motorun hibrit skoru. Esikler 0.50-0.95 araliginda 0.05 adimlidir.
