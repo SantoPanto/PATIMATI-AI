@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 # Bildirim eşiği — ortam değişkeninden ayarlanabilir (varsayılan 0.70,
 # 111 fotoğrafla ölçülerek doğrulandı; bkz. scripts/measure_threshold.py)
-MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.70"))
+MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.65"))
 
 # Sözleşmede aday üst sınırı 100; burada da zorluyoruz ki gelen liste büyükse
 # sessizce boğulmak yerine kırpıp raporlayalım (bkz. sözleşme §5).
