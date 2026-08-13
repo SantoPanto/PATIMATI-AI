@@ -136,10 +136,15 @@ kontrolü yalnız HTTP'ye bakabildiği için tüketicinin canlılığı ancak b�
 korunuyor. `docker run`ın varsayılan politikası `no` olduğundan, bayrak
 verilmezse konteyner ölür ve **öyle kalır**.
 
-**Bellek:** her süreç modeli kendi belleğine yükler, süreçler arası paylaşım
-yok. `hepsi` rolü belleği kabaca **ikiye katlar** (`KIMLIK_MODEL=clip` ile süreç
-başına bir CLIP; `siglip2-animal` ile süreç başına iki model). Dar bellekli
-ortamlarda `hepsi` yerine aynı imajdan iki servis açın:
+**Bellek — ölçülen:** `hepsi` rolü, `KIMLIK_MODEL=clip`, bir analiz sonrası
+**653 MiB** (CI'daki `docker stats` adımı, her koşumda yeniden basılıyor).
+Her süreç modeli kendi belleğine yükler ve süreçler arası **paylaşım yoktur**;
+buna rağmen sayı naif bir "ikiye katlama"dan düşük çıkıyor — muhtemelen
+ağırlıklar safetensors üzerinden eşlemeli okunduğu için salt-okunur sayfalar
+çekirdek önbelleğinde ortaklaşıyor. **Bu mekanizma ölçülmedi**, sayı ölçüldü.
+`siglip2-animal` ile süreç başına İKİ model yükleniyor, o hâli **hiç
+ölçmedik** — dar bellekli bir ortama koymadan önce yukarıdaki adımın çıktısına
+bakın. Gerekirse `hepsi` yerine aynı imajdan iki servis açın:
 
 ```bash
 docker run -e SERVIS_ROLU=http   -p 8000:8000 patimati-ai
