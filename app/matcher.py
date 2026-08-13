@@ -215,8 +215,19 @@ def adaylari_eslestir(embeddings, labels, species, candidates,
     KATIDIR — sürümü tutmayan aday atlanır, çünkü farklı sürümle üretilmiş
     vektörler kıyaslanamaz ve hata vermeden yanlış benzerlik üretir.
 
+    SORGUNUN kendi embedding'i (aday değil, `embeddings` parametresi) burada,
+    döngüden ÖNCE doğrulanır. Doğrulanmazsa `compute_final_score` her aday
+    için aynı hatayla patlar ve döngüdeki try/except bunu "bu aday bozuk" diye
+    yorumlayıp her adayı `gecersiz_embedding` altında sessizce eler — çağıran
+    tarafın KENDİ isteği bozuk olsa bile sonuç "eşleşme yok" gibi görünür.
+    Burada erken ve açıkça fırlatmak, hatanın doğru yere (çağıran) gitmesini
+    sağlar (bkz. `app/main.py`'deki `/match` ucu, bunu 400'e çeviriyor).
+
     Dönüş: (eşleşmeler, atlananlar)
     """
+    for vektor in _vektor_listesi(embeddings):
+        dogrula_embedding(vektor, "embeddings")
+
     atlanan = {"toplam": 0, "kendisi": 0, "tekrar_eden": 0,
                "model_surumu_uyusmuyor": 0, "gecersiz_embedding": 0,
                "aday_siniri_asildi": 0}

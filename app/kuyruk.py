@@ -43,7 +43,8 @@ from .topoloji import (AMQP_URL, DLQ, DLX, EXCHANGE, ISTEK_ANAHTARI,  # noqa: F4
 # okuyor. Sıra bozulursa .env hiç okunmamış gibi davranır ve servis, yazdığın
 # ayarları sessizce yok sayıp varsayılanlarla çalışır.
 from .analiz import urlleri_analiz_et
-from .hatalar import AIHatasi, DesteklenmeyenSema, GecersizIstek, ModelHatasi
+from .hatalar import (AIHatasi, DesteklenmeyenSema, GecersizEmbedding,
+                      GecersizIstek, ModelHatasi)
 from .matcher import adaylari_eslestir
 from .models import KuyrukIstegi
 from .surum import MODEL_SURUMU
@@ -122,13 +123,21 @@ def istegi_isle(mesaj: dict) -> dict:
         # eşleşmeyi engellemeyen değer sayıyor) — yanlış eleme yapmamak için.
         tur = istek.declared_species or analiz["species"]
 
-        matches, atlanan = adaylari_eslestir(
-            embeddings=analiz["embeddings"],
-            labels=analiz["labels"],
-            species=tur,
-            candidates=istek.candidates,
-            ad_id=istek.ad_id,
-        )
+        try:
+            matches, atlanan = adaylari_eslestir(
+                embeddings=analiz["embeddings"],
+                labels=analiz["labels"],
+                species=tur,
+                candidates=istek.candidates,
+                ad_id=istek.ad_id,
+            )
+        except GecersizEmbedding as e:
+            # Burada patlayan embedding Java'dan gelmiyor, bir satır yukarıdaki
+            # urlleri_analiz_et'in ürettiği vektör — yani sorun çağıranda değil
+            # bizim model çıktımızda. INTERNAL'e düşseydi Java "bizde bir şey
+            # patladı" diye AI servisinin içinde arardı; MODEL_ERROR doğru yere
+            # işaret ediyor (bkz. app/matcher.py'deki adaylari_eslestir).
+            raise ModelHatasi(f"sorgu embedding'i geçersiz: {e}") from e
 
         # `analysis` bloğu sözleşmede sabit bir alan kümesi. urlleri_analiz_et
         # bunlara ek olarak photo_count/failed_photos/model_version döndürüyor;

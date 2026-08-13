@@ -1,0 +1,2 @@
+wildlife-tools>=0.0.9
+matplotlib>=3.7.0
