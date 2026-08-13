@@ -152,6 +152,11 @@ def istegi_isle(mesaj: dict) -> dict:
                 "colors": analiz["colors"],
                 "labels": analiz["labels"],
             },
+            # TODO (NLP Entegrasyonu): PatiMatiTextExtractor modülü ana projeye dâhil
+            # edildiğinde, kullanıcının ilan açıklaması analiz edilecek
+            # ve dönen nitelikler (niyet, tasma durumu vb.) aşağıdaki alanlara bağlanacaktır.
+            "nlp_attributes": {},
+            "extracted_features": [],
             "matches": matches,
             "skipped_candidates": atlanan,
             # Sözleşmede yok ama eklemek kırıcı değil (§9): indirilemeyen
