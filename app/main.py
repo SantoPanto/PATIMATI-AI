@@ -14,7 +14,7 @@ from .analiz import urlleri_analiz_et
 from .attributes import attribute_analyzer
 from .embedder import PetEmbedder, embedder, kimlik_gomucu
 from .hatalar import AIHatasi, FotografIndirilemedi, GecersizGoruntu
-from .matcher import adaylari_eslestir, compute_final_score
+from .matcher import MATCH_THRESHOLD, adaylari_eslestir, compute_final_score
 from .models import AnalyzeResponse, AnalyzeUrlRequest, MatchRequest
 from .surum import MODEL_SURUMU, SECILEN_KIMLIK, VEKTOR_BOYUTU
 
@@ -45,11 +45,15 @@ app.add_middleware(
 async def health():
     # İki model birden çalışıyor; hangisinin ne yaptığı buradan görünsün ki
     # yanlış yapılandırmayla ayağa kalkan bir servis fark edilebilsin.
+    # Eşik de aynı sebeple burada: ortam değişkeniyle eziliyor, ve bir kez
+    # kod ile belgeler farklı değer söyler hâle geldi. Servisin GERÇEKTE
+    # hangi eşikle karar verdiği dışarıdan görünsün.
     return {"status": "ok",
             "etiket_modeli": PetEmbedder.MODEL_ID,
             "kimlik_modeli": SECILEN_KIMLIK,
             "vektor_boyutu": VEKTOR_BOYUTU,
-            "model_version": MODEL_SURUMU}
+            "model_version": MODEL_SURUMU,
+            "match_threshold": MATCH_THRESHOLD}
 
 
 def _oznitelik_cikar(img_bytes: bytes, embedding: list[float] | None) -> dict:

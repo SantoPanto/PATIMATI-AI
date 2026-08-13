@@ -56,9 +56,14 @@ r = httpx.post(f"{BASE}/match",
 r.raise_for_status()
 cevap = r.json()
 
-print("\nEşleştirme sonucu (yüksekten düşüğe):")
+# Eşiği servise soruyoruz, buraya yazmıyoruz: ortam değişkeniyle eziliyor,
+# yani bu betiğin konuştuğu servis başka bir eşikle koşuyor olabilir. Sabit
+# yazılırsa demo yanlış sayı söyler — bir kez tam olarak bu oldu.
+esik = httpx.get(f"{BASE}/health", timeout=30).json()["match_threshold"]
+
+print(f"\nEşleştirme sonucu (yüksekten düşüğe) — servisin bildirim eşiği: {esik}")
 for m in cevap["matches"]:
-    durum = "BİLDİRİM GİDER (>= 0.70)" if m["match"] else "bildirim yok"
+    durum = f"BİLDİRİM GİDER (>= {esik})" if m["match"] else "bildirim yok"
     print(f"  {adlar.get(m['ad_id'], m['ad_id'])}: toplam={m['score']:.3f} "
           f"(görsel={m['visual']:.3f}, etiket={m['label']:.3f}, "
           f"konum={m['location']:.3f}) → {durum}")
