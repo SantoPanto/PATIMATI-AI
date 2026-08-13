@@ -68,13 +68,18 @@ def test_readme_esik_sayisini_tekrarlamiyor():
     """README sayıyı tekrar etmesin; `MATCH_THRESHOLD`'a işaret etsin."""
     readme = (KOK / "README.md").read_text(encoding="utf-8")
 
-    # Yalnız "eşik" kelimesiyle aynı satırda geçen çıplak ondalık sayıyı arıyoruz;
+    # Yalnız eşikten söz eden satırdaki çıplak ondalık sayıyı arıyoruz;
     # README'deki başka sayılar (%55/%30/%15 ağırlıkları, port numaraları) masum.
+    #
+    # ⚠️ "eşik" diye aramak YETMEZ: Türkçede k→ğ yumuşaması var ve README'de
+    # kelime "eşiği" diye geçiyor — "eşik" alt dizgisi o kelimede HİÇ yok.
+    # Bu bekçinin ilk hâli tam bu yüzden bozuktu ve mutasyon denemesinde
+    # yakalandı (bozdum, yeşil kaldı). `eşi[kğ]` ikisini de kapsar.
+    tetikleyici = re.compile(r"eşi[kğ]|MATCH_THRESHOLD", re.IGNORECASE)
     suclu = [
         satir.strip()
         for satir in readme.splitlines()
-        if re.search(r"eşik", satir, re.IGNORECASE)
-        and re.search(r"\b0[.,]\d{2}\b", satir)
+        if tetikleyici.search(satir) and re.search(r"\b0[.,]\d{2}\b", satir)
     ]
     assert not suclu, (
         "README eşik sayısını tekrarlıyor: "
