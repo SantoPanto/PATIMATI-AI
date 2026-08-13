@@ -371,3 +371,56 @@ def test_turkce_karakterler_bozulmadan_gider(sahte_analiz):
                         json.dumps(istek()).encode("utf-8"))
     govde = kanal.olaylar[0][3]
     assert json.loads(govde.decode("utf-8"))["analysis"]["breed"] == "Tekir"
+
+
+# ---------------------------------------------------------------------------
+# Kapanış sinyalleri
+#
+# NEDEN TEST EDİLİYOR: konteynerde `docker stop` SIGTERM gönderiyor ve
+# SERVIS_ROLU=kuyruk rolünde bu süreç PID 1 oluyor. Linux, PID 1'e gelen ve
+# İŞLEYİCİSİ OLMAYAN sinyalin varsayılan eylemini uygulamaz — sinyali yutar.
+# Yani işleyici olmadan konteyner `docker stop` ile hiç durmaz, 10 sn sonra
+# SIGKILL yer ve dinle()'deki düzgün kapanış hiç çalışmaz.
+#
+# Uçtan uca kanıtı CI'daki "kuyruk rolü + PID 1'de düzgün kapanış" adımı
+# veriyor (çıkış kodu 0 mı 137 mi diye bakıyor). Buradaki testler o adımın
+# yerine geçmez; işleyicinin MANTIĞINI saniyeler içinde sabitler.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def sinyal_duzeni_korunsun():
+    """Sinyal düzeni SÜREÇ GENELİNDE geçerli — test onu kalıcı bozmasın."""
+    import signal
+    onceki = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGINT)}
+    yield
+    for s, isleyici in onceki.items():
+        signal.signal(s, isleyici)
+
+
+def test_sigterm_keyboardinterrupt_a_cevriliyor(sinyal_duzeni_korunsun):
+    """dinle() zaten KeyboardInterrupt'ı yakalayıp düzgün kapanıyor (Ctrl+C
+    yolu). İkinci bir kapanış yolu yazmak yerine sinyali oraya BAĞLIYORUZ."""
+    import signal
+    kuyruk._kapanis_sinyallerini_yakala()
+    for numara in (signal.SIGTERM, signal.SIGINT):
+        isleyici = signal.getsignal(numara)
+        assert callable(isleyici), f"{numara} için işleyici kurulmamış"
+        with pytest.raises(KeyboardInterrupt):
+            isleyici(numara, None)
+
+
+def test_ikinci_sinyal_varsayilana_dusuyor(sinyal_duzeni_korunsun):
+    """İşleyicinin ilk satırı SIG_DFL kurmalı.
+
+    Yoksa ikinci SIGTERM, dinle()'nin kapanış bloğundaki
+    `try: ... except Exception: pass` içinde patlar — KeyboardInterrupt bir
+    Exception DEĞİLDİR, oradan kaçar ve süreç düzgün kapanmanın tam ortasında
+    iz dökerek ölür.
+    """
+    import signal
+    kuyruk._kapanis_sinyallerini_yakala()
+    isleyici = signal.getsignal(signal.SIGTERM)
+    with pytest.raises(KeyboardInterrupt):
+        isleyici(signal.SIGTERM, None)
+    assert signal.getsignal(signal.SIGTERM) is signal.SIG_DFL, (
+        "ikinci sinyal hâlâ işleyiciye düşüyor; kapanış ortasında iz dökme riski")

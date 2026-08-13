@@ -484,6 +484,7 @@ yazmaya gerek yok.
 | Python AI — SSRF koruması | ✅ Beyaz liste, yerel ağ engeli, bağlantı-yerel mutlak yasak, yönlendirme yok, boyut/zaman sınırı |
 | Python AI — cins (`breed`) | ✅ Yapıldı — 37 ırk zero-shot; top-1 %78, güven eşiği 0.70 üstünde %90 (ölçüm: `scripts/measure_breed.py`) |
 | Python AI — RabbitMQ tüketici/üretici | ✅ `app/kuyruk.py` — topoloji, tüketici, üretici, DLQ, yeniden bağlanma. Ayrı süreç: `python -m app.kuyruk`. 21 test broker olmadan koşuyor (`tests/test_kuyruk.py`) |
+| Python AI — tüketicinin imajda çalışması | ✅ **Düzeltildi.** İmajın `CMD`'i yalnız uvicorn'u başlatıyordu; tüketici üretimde HİÇ çalışmıyor, ilanlar sonsuza kadar `ai_status=PENDING` kalıyordu. Artık `entrypoint.sh` iki süreci de kaldırıyor (`SERVIS_ROLU=hepsi\|http\|kuyruk`, varsayılan `hepsi`); biri ölürse konteyner sıfırdan farklı kodla kapanıyor. `docker stop` artık düzgün kapanıyor (SIGTERM işleyicisi). Her PR'da ölçülüyor: `ci.yml` → `docker` işi imajı kurup `/health` + kuyruk akışını gerçek broker üzerinde sınıyor |
 | Python AI — uçtan uca kanıt | ✅ **Gerçek broker üzerinde koşturuldu** (2026-07-28, RabbitMQ 4.3.4 + Erlang 27.3.4.13). `scripts/sahte_java.py` Java'nın yerine geçip istek yayınladı, sonuç 2,4 sn'de döndü ve sözleşme denetimini geçti — **`siglip2-animal/v2`, 768 boyutlu vektör**, yani bu belgedeki boyutla birebir. `--hata-yollari` kipiyle DLQ ve hata cevabı da doğrulandı |
 | Java — `Ad.photoUrls` | ⬜ KISIM 2'de |
 | Java — `ai_*` alanları | ⬜ AI sorumlusunda |

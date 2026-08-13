@@ -62,6 +62,10 @@ venv\Scripts\python.exe -m app.kuyruk
 Ayarlar `.env` içinde (`AMQP_URL`, `AMQP_PREFETCH`, `AMQP_HEARTBEAT`).
 Topolojiyi tüketici kendisi ilan eder — elle kuyruk oluşturmaya gerek yok.
 
+Yukarıdaki komut **lokal geliştirme içindir**. Konteynerde bu süreci elle
+başlatmak gerekmez: imaj `SERVIS_ROLU` ile ikisini de kaldırabiliyor, bkz.
+[Docker](#docker).
+
 ### Lokal RabbitMQ (Windows, yönetici yetkisi gerekmez)
 
 Windows servisine kaydolmadan, zip'ten çalıştırılabilir:
@@ -108,13 +112,64 @@ başarılı olur, mesajlar ise hata vermeden yok olurdu.
 
 ## Docker
 
+İmaj **iki süreç** barındırır: HTTP servisi (uvicorn) ve kuyruk tüketicisi
+(`python -m app.kuyruk`). Hangisinin çalışacağını `SERVIS_ROLU` seçer.
+
+| `SERVIS_ROLU` | Ne çalışır | Nerede kullanılır |
+|---|---|---|
+| `hepsi` (varsayılan) | ikisi birden | tek makine, lokal, küçük kurulum |
+| `http` | yalnız uvicorn | Railway vb. — servis başına tek süreç |
+| `kuyruk` | yalnız tüketici | Railway vb. — ikinci servis, aynı imajdan |
+
 ```bash
 docker build -t patimati-ai .
-docker run -p 8000:8000 patimati-ai
+
+docker run -p 8000:8000 --restart unless-stopped \
+  -e AMQP_URL='amqp://kullanici:parola@broker:5672/%2F' \
+  -e PHOTO_ALLOWED_HOSTS='cdn.alanadi.com' \
+  patimati-ai
 ```
+
+**`--restart` gerekli, süs değil.** Süreçlerden biri ölürse konteyner bilerek
+sıfırdan farklı bir kodla kapanıyor (gerekçe `entrypoint.sh` içinde). Sağlık
+kontrolü yalnız HTTP'ye bakabildiği için tüketicinin canlılığı ancak böyle
+korunuyor. `docker run`ın varsayılan politikası `no` olduğundan, bayrak
+verilmezse konteyner ölür ve **öyle kalır**.
+
+**Bellek:** her süreç modeli kendi belleğine yükler, süreçler arası paylaşım
+yok. `hepsi` rolü belleği kabaca **ikiye katlar** (`KIMLIK_MODEL=clip` ile süreç
+başına bir CLIP; `siglip2-animal` ile süreç başına iki model). Dar bellekli
+ortamlarda `hepsi` yerine aynı imajdan iki servis açın:
+
+```bash
+docker run -e SERVIS_ROLU=http   -p 8000:8000 patimati-ai
+docker run -e SERVIS_ROLU=kuyruk                patimati-ai
+```
+
+**Üretimde verilmesi gerekenler** (`.env` imaja girmez, `.dockerignore`'dadır —
+hepsi `-e` / `--env-file` ile geçilir):
+
+- `AMQP_URL` — broker adresi. Verilmezse `localhost` denenir ve tüketici
+  bağlanamadan artan beklemeyle döner durur.
+- `PHOTO_ALLOWED_HOSTS` — **boş bırakılırsa hiçbir fotoğraf indirilmez** ve her
+  analiz boş döner. Üretimde CDN alan adı yazılır.
+- `MATCH_THRESHOLD` — bildirim eşiği. Çalışan değeri `/health` döndürür.
+- `KIMLIK_MODEL` — `clip` dışında bir değer kullanılacaksa **hem build-arg hem
+  ortam değişkeni** olarak verilmeli (yukarıdaki Dockerfile notu). `hepsi`
+  rolünde iki süreç ağırlığı aynı anda indirmeye çalışır: veri kaybı olmaz
+  (HuggingFace dosya kilidi sıraya sokar) ama soğuk açılış iki katına çıkar.
+
+`SERVIS_ROLU` **`.env`'den okunmaz** — değişken Python başlamadan önce, giriş
+betiği tarafından okunuyor; `load_dotenv()` ona erişemez. `docker run -e` ile
+verin.
 
 Model imajın içine build sırasında gömülür (~600 MB); container ağ erişimi olmadan
 da çalışır. Railway'de `PORT` ortam değişkeni otomatik kullanılır.
+
+İmajın gerçekten kalktığı ve kuyruğun işlediği her PR'da ölçülüyor:
+`.github/workflows/ci.yml` içindeki `docker` işi imajı kurar, RabbitMQ ile
+ayağa kaldırır, `/health`'i çeker ve `scripts/sahte_java.py` ile kuyruğa bir
+ilan bırakıp sonucu bekler.
 
 ## Test
 

@@ -23,6 +23,7 @@ içine gömmek de HTTP isteklerini aç bırakırdı — bu yüzden ayrı süreç
 """
 import json
 import logging
+import signal
 import time
 from datetime import datetime, timezone
 
@@ -273,8 +274,56 @@ def dinle(amqp_url: str | None = None) -> None:
             bekleme = min(bekleme * 2, 30.0)
 
 
+def _kapanis_sinyallerini_yakala() -> None:
+    """SIGTERM/SIGINT'i KeyboardInterrupt'a çevirir — MEVCUT kapanış yolunu kullanır.
+
+    NEDEN: `docker stop` ve Railway SIGTERM gönderiyor. Python'un SIGTERM için
+    varsayılan düzeni SIG_DFL ve bu, sürecin nerede durduğuna göre İKİ FARKLI
+    biçimde yanlış:
+
+      - Konteynerde SERVIS_ROLU=kuyruk ile: entrypoint `exec` ettiği için bu
+        süreç PID 1'dir. Linux, PID 1'e gelen ve İŞLEYİCİSİ OLMAYAN sinyalin
+        varsayılan eylemini UYGULAMAZ — sinyali sessizce yutar. Yani süreç
+        `docker stop` ile HİÇ durmaz; 10 sn beklenir ve SIGKILL gelir,
+        aşağıdaki düzgün kapanış hiç çalışmaz.
+      - SERVIS_ROLU=hepsi ile (PID 1 değil): varsayılan eylem uygulanır ve
+        süreç anında ölür; dinle() içindeki stop_consuming + connection.close
+        yine çalışmaz.
+
+    NEDEN YENİ KAPANIŞ MANTIĞI YAZMIYORUZ: dinle() zaten KeyboardInterrupt'ı
+    yakalayıp düzgün kapanıyor (Ctrl+C yolu). Sinyali oraya BAĞLAMAK, ikinci bir
+    kapanış yolu yazmaktan iyidir — iki yol zamanla birbirinden kayar.
+
+    NEDEN __main__ İÇİNDE, dinle() İÇİNDE DEĞİL:
+      - signal.signal() yalnızca ANA yorumlayıcının ANA iş parçacığında çalışır,
+        başka yerde ValueError fırlatır. dinle()'nin içine koymak onu ileride
+        bir iş parçacığında çalıştırmayı imkânsız kılardı.
+      - Sinyal düzeni SÜRECE aittir, bir kuyruk bağlantısına değil.
+        `from app import kuyruk` yapan testler süreç genelinde sinyal düzenini
+        değiştirmemeli. logging.basicConfig() de aynı sebeple burada.
+
+    Analiz sırasında sinyal gelirse: mesaj ONAYLANMAZ, RabbitMQ yeniden teslim
+    eder. Sözleşme §8 bunu zaten kapsıyor ("en az bir kez"; Java tarafı ad_id
+    üzerinden idempotent). Doğru takas: `docker stop` mühleti 10 sn, en kötü
+    analiz ~20 sn — beklemek SIGKILL'i garanti ederdi.
+    """
+    def _isle(numara, _cerceve):
+        # BU SATIR ÖNEMLİ: aynı sinyal ikinci kez gelirse varsayılan davranış
+        # (anında ölüm) devreye girsin. Yoksa ikinci KeyboardInterrupt,
+        # dinle()'deki `try: ... except Exception: pass` bloğunun İÇİNDE
+        # patlar — KeyboardInterrupt bir Exception DEĞİLDİR, oradan kaçar ve
+        # süreç düzgün kapanmanın tam ortasında iz dökerek ölür.
+        signal.signal(numara, signal.SIG_DFL)
+        logger.info("Sinyal %s alındı, kapatılıyor...", numara)
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, _isle)
+    signal.signal(signal.SIGINT, _isle)
+
+
 if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    _kapanis_sinyallerini_yakala()
     dinle()
