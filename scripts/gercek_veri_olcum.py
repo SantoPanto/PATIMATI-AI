@@ -7,7 +7,9 @@ Veri: tests/gercek_veri/
 Neden gerekli: Oxford-IIIT Pet seti safkan hayvanların stüdyo fotoğraflarıydı ve
 iki şeyi ÖLÇEMİYORDU:
   1. "Hayvan mı" kapısının gerçek yakalama oranı (elimizde hiç negatif yoktu)
-  2. Eşik 0.70 gerçekten aynı hayvanın İKİ AYRI fotoğrafında tutuyor mu
+  2. Yürürlükteki eşik (app.matcher.MATCH_THRESHOLD — betik zaten oradan
+     okuyor, buraya sayı yazmıyoruz ki değer değişince bu metin yalan olmasın)
+     gerçekten aynı hayvanın İKİ AYRI fotoğrafında tutuyor mu
      (önceki doğrulama aynı fotoğrafı bozarak yapılmıştı — çok daha kolay bir test)
 
 Farklı birey karşılaştırması için seed setindeki Bombay (class_07) kullanılıyor:

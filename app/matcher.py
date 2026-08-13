@@ -9,9 +9,28 @@ from .surum import MODEL_SURUMU, VEKTOR_BOYUTU
 
 logger = logging.getLogger(__name__)
 
-# Bildirim eşiği — ortam değişkeninden ayarlanabilir (varsayılan 0.70,
-# 111 fotoğrafla ölçülerek doğrulandı; bkz. scripts/measure_threshold.py)
-MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.65"))
+# Bildirim eşiği — ortam değişkeninden ayarlanabilir.
+#
+# ⚠️ DEĞER TARTIŞMALI, KARAR BEKLİYOR. Kısa geçmişi, çünkü buraya bakan bir
+# sonraki kişi "hangi sayı doğru" diye soracak:
+#   - Uzun süre 0.70'ti (o günkü gerekçe: scripts/measure_threshold.py).
+#   - 2026-08-13'te 0.65'e indirildi. O kalibrasyon 5 fotoğrafın 10 YABANCI
+#     çiftinden türetilmişti: kümede aynı hayvana ait tek bir çift bile yoktu,
+#     yani "aynı hayvan bu eşiği hâlâ geçiyor mu" hiç ölçülmemişti. Ayrıca
+#     üretimdekinden farklı bir kimlik modeliyle (google-siglip2) koşulmuştu.
+#   - Üretim modeli (siglip2-animal) ve bu dosyadaki compute_final_score ile
+#     İKİ TARAFLI ölçüldüğünde 0.65 belirgin biçimde daha kötü çıktı:
+#     yanlış alarm %57.7 -> %80.5, buna karşılık yakalama %94.9 -> %96.9.
+#     Yani 22.8 puan yanlış alarmın karşılığı 2 puan yakalama.
+#   ⇒ Varsayılan 0.70'e geri alındı. Bu "0.70 doğru değer" demek DEĞİL —
+#     0.70'te de yabancıların yarısından fazlası eşiği geçiyor. Nihai değer
+#     ekip kararı; ölçüm tabloları docs/olcum-raporu.md §4.1'de.
+#
+# Eşiğin ne demek olduğu için sözleşme §7: `match: true` "kesin aynı hayvan"
+# değil, "bildirim gönderecek kadar eminiz" demektir. Eşiği geçmeyen adaylar
+# arayüzde listelenmeye devam eder — bu yüzden eşiği yükseltmek eşleşmeleri
+# KAYBETTİRMEZ, yalnızca bildirim gönderilenleri azaltır.
+MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.70"))
 
 # Sözleşmede aday üst sınırı 100; burada da zorluyoruz ki gelen liste büyükse
 # sessizce boğulmak yerine kırpıp raporlayalım (bkz. sözleşme §5).

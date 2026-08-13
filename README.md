@@ -13,7 +13,7 @@ elle çalıştırılan bir offline pipeline'dır — bkz. [Model Eğitimi](#mode
 |---|---|
 | CLIP ViT-B/32 | Fotoğraftan 512 boyutlu embedding (görsel parmak izi) |
 | CLIP zero-shot + piksel analizi | Tür (cat/dog) + desen + dominant renk etiketleri — tamamen lokal, dış API'siz |
-| Hibrit skor | %55 görsel + %30 etiket + %15 konum → eşik 0.70 (`MATCH_THRESHOLD` ile ayarlanabilir) |
+| Hibrit skor | %55 görsel + %30 etiket + %15 konum → bildirim eşiği `MATCH_THRESHOLD` (varsayılanı ve neden tartışmalı olduğu `app/matcher.py`'nin başında; sayıyı burada tekrarlamıyoruz ki kayması mümkün olmasın) |
 | FastAPI | `/health`, `/analyze`, `/match` endpoint'leri (port 8000) |
 
 Not: Plandaki Google Vision API, faturalandırma şartı nedeniyle CLIP zero-shot ile
