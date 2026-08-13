@@ -162,6 +162,8 @@ Python → Java.
     "colors": [{ "name": "brown", "score": 0.41 }],
     "labels": ["cat", "tabby", "brown", "white"]
   },
+  "nlp_attributes": {},
+  "extracted_features": [],
   "matches": [
     {
       "ad_id": 98,
@@ -194,6 +196,8 @@ Python → Java.
 | `analysis.species` | `cat` \| `dog` \| `unknown`. Güveni düşükse `unknown` döner. |
 | `analysis.is_pet` | `false` → fotoğrafta kedi/köpek görünmüyor (ekran görüntüsü, insan, nesne...). Arayüz kullanıcıdan başka bir fotoğraf isteyebilir. Ölçüm: 111 gerçek hayvan fotoğrafında **0 yanlış reddetme**; gerçek "hayvan olmayan fotoğraf" test kümesi henüz olmadığı için yakalama oranı ölçülmedi, bu yüzden kapı temkinli ayarlandı. |
 | `analysis.breed` | Bilgi amaçlı. **Filtre olarak kullanılmaz** (bkz. §7). `is_pet` false ise her zaman `null`. |
+| `nlp_attributes` | NLP çıkarımları için yer tutucu nesne. Şimdilik boş (`{}`) döner; NLP modülü entegre edildiğinde niyet/tasma durumu gibi anahtarlar buraya yazılır. |
+| `extracted_features` | NLP tarafından çıkarılan özelliklerin listesi. Şimdilik boş dizi (`[]`) döner; entegrasyon sonrası metinden türetilen etiketler burada taşınır. |
 | `matches` | Skora göre azalan sıralı, en fazla 20 kayıt. Aday yoksa boş dizi. |
 | `skipped_candidates` | Elenen adayların gerekçeli sayımı. "Hiç eşleşme çıkmadı" durumunun sebebi görünür olsun diye vardır — özellikle `model_surumu_uyusmuyor` sıfırdan büyükse ilgili ilanların yeniden analiz edilmesi gerekir. |
 | `matches[].match` | `score >= eşik` ise `true`. Eşik AI tarafında ortam değişkeniyle ayarlanır. |
