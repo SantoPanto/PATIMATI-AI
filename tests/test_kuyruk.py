@@ -124,6 +124,30 @@ def test_model_patlarsa_model_error(sahte_analiz):
     assert sonuc["error"]["code"] == "MODEL_ERROR"
 
 
+def test_sorgu_embeddingi_bozuksa_model_error(monkeypatch):
+    """GecersizEmbedding INTERNAL'e düşmemeli.
+
+    Burada patlayan embedding Java'dan gelmiyor, urlleri_analiz_et'in ürettiği
+    vektör — yani sorun çağıranda değil bizim model çıktımızda. Önceden
+    ValueError'dan türeyen bu hata genel except'e düşüp INTERNAL dönüyordu;
+    Java "bizde bir şey patladı" diye AI servisinin içinde arıyordu.
+    """
+    def _sahte(urls):
+        return {
+            "embeddings": [[1.0] * 10],  # yanlış boyut
+            "species": "cat", "species_confidence": 0.95, "is_pet": True,
+            "breed": "Tekir", "breed_confidence": 0.81, "pattern": "tabby",
+            "colors": [{"name": "brown", "score": 0.4}],
+            "labels": ["cat", "tabby"], "model_version": MODEL_SURUMU,
+            "photo_count": len(urls), "failed_photos": [],
+        }
+    monkeypatch.setattr(kuyruk, "urlleri_analiz_et", _sahte)
+
+    sonuc = istegi_isle(istek(candidates=[aday()]))
+    assert sonuc["status"] == "error"
+    assert sonuc["error"]["code"] == "MODEL_ERROR"
+
+
 def test_istegi_isle_asla_firlatmaz():
     """Fırlatırsa mesaj onaylanmaz, sonsuza kadar yeniden teslim edilir.
 

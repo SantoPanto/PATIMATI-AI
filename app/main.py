@@ -14,7 +14,7 @@ from .analiz import urlleri_analiz_et
 from .attributes import attribute_analyzer
 from .embedder import PetEmbedder, embedder, kimlik_gomucu
 from .hatalar import AIHatasi, FotografIndirilemedi, GecersizGoruntu
-from .matcher import adaylari_eslestir, compute_final_score
+from .matcher import MATCH_THRESHOLD, adaylari_eslestir, compute_final_score
 from .models import AnalyzeResponse, AnalyzeUrlRequest, MatchRequest
 from .surum import MODEL_SURUMU, SECILEN_KIMLIK, VEKTOR_BOYUTU
 
@@ -33,7 +33,10 @@ app = FastAPI(title="PatiMati AI Service", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv("ALLOWED_ORIGINS", "*")],
+    # Virgülle ayrılmış birden fazla origin desteklenir (ör. prod + staging).
+    # Tek elemanlı liste yazılsaydı CORSMiddleware tüm string'i TEK bir origin
+    # sanır, virgülden sonraki hiçbir origin asla eşleşmezdi.
+    allow_origins=[o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",") if o.strip()],
     allow_methods=["*"], allow_headers=["*"],
 )
 
@@ -42,25 +45,32 @@ app.add_middleware(
 async def health():
     # İki model birden çalışıyor; hangisinin ne yaptığı buradan görünsün ki
     # yanlış yapılandırmayla ayağa kalkan bir servis fark edilebilsin.
+    # Eşik de aynı sebeple burada: ortam değişkeniyle eziliyor, ve bir kez
+    # kod ile belgeler farklı değer söyler hâle geldi. Servisin GERÇEKTE
+    # hangi eşikle karar verdiği dışarıdan görünsün.
     return {"status": "ok",
             "etiket_modeli": PetEmbedder.MODEL_ID,
             "kimlik_modeli": SECILEN_KIMLIK,
             "vektor_boyutu": VEKTOR_BOYUTU,
-            "model_version": MODEL_SURUMU}
+            "model_version": MODEL_SURUMU,
+            "match_threshold": MATCH_THRESHOLD}
 
 
-def _oznitelik_cikar(img_bytes: bytes) -> dict:
+def _oznitelik_cikar(img_bytes: bytes, embedding: list[float] | None) -> dict:
     """Öznitelikleri çıkarır; hata olursa boş etiketlerle devam eder.
 
     Embedding zaten hesaplandığı için eşleştirme etiketsiz de çalışır —
     öznitelik hatası tüm analizi düşürmemeli.
 
-    Kimlik vektörü buraya GEÇİRİLMEZ: kimlik modeli CLIP'ten farklıysa vektör
-    başka bir uzayda olur ve zero-shot metin karşılaştırması sessizce yanlış
-    etiket üretir. attribute_analyzer kendi CLIP vektörünü hesaplar.
+    `embedding` YALNIZCA kimlik modeli CLIP'in kendisiyse geçirilir (bkz.
+    `_goruntuyu_isle`): o zaman ikisi aynı uzaydadır ve CLIP'i aynı fotoğraf
+    için ikinci kez çalıştırmak anlamsızdır. Aksi halde None geçirilir ve
+    attribute_analyzer kendi CLIP vektörünü hesaplar — kimlik modeli farklıysa
+    (ör. SigLIP2) vektör başka bir uzayda olur ve zero-shot metin
+    karşılaştırması sessizce yanlış etiket üretir.
     """
     try:
-        return attribute_analyzer.analyze(img_bytes)
+        return attribute_analyzer.analyze(img_bytes, embedding=embedding)
     except Exception as e:
         logger.error(f"Öznitelik çıkarma hatası (etiketsiz devam ediliyor): {e}")
         return {"labels": [], "species": "unknown", "species_confidence": 0.0,
@@ -84,7 +94,8 @@ async def _goruntuyu_isle(img_bytes: bytes) -> tuple[list[float], dict]:
         logger.error(f"Embedding hatası: {e}")
         raise HTTPException(500, "Analiz sırasında hata oluştu.")
 
-    vision = await run_in_threadpool(_oznitelik_cikar, img_bytes)
+    onceden_hesaplanan = embedding if kimlik_gomucu.clip_mi else None
+    vision = await run_in_threadpool(_oznitelik_cikar, img_bytes, onceden_hesaplanan)
     return embedding, vision
 
 

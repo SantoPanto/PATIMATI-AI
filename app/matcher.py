@@ -9,9 +9,55 @@ from .surum import MODEL_SURUMU, VEKTOR_BOYUTU
 
 logger = logging.getLogger(__name__)
 
-# Bildirim eşiği — ortam değişkeninden ayarlanabilir (varsayılan 0.70,
-# 111 fotoğrafla ölçülerek doğrulandı; bkz. scripts/measure_threshold.py)
-MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.65"))
+# Bildirim eşiği — ortam değişkeninden ayarlanabilir.
+#
+# ÖLÇÜT (asıl mesele bu; sayı bunun sonucu):
+#   Sözleşme §7 gereği eşiği geçemeyen adaylar arayüzde LİSTELENMEYE DEVAM
+#   EDER, yalnızca bildirim tetiklenmez. Yani eşiği yükseltmek eşleşme
+#   KAYBETTİRMEZ — sadece telefonu daha az titretir. Buradan:
+#     - kaçırmanın (bildirim gitmemesi) bedeli DÜŞÜK: eşleşme listede duruyor
+#     - yalanın (yanlış bildirim) bedeli YÜKSEK: kullanıcı yanlış hayvanın
+#       ilanına gidiyor ve bir daha bildirimlere güvenmiyor
+#   ⇒ eşik, isabet (precision) tarafına yaslanmalı.
+#
+# Kısa geçmişi, çünkü buraya bakan bir sonraki kişi "hangi sayı doğru" diye soracak:
+#   - Uzun süre 0.70'ti (o günkü gerekçe: scripts/measure_threshold.py).
+#   - 2026-08-13'te 0.65'e indirildi. O kalibrasyon 5 fotoğrafın 10 YABANCI
+#     çiftinden türetilmişti: kümede aynı hayvana ait tek bir çift bile yoktu,
+#     yani "aynı hayvan bu eşiği hâlâ geçiyor mu" hiç ölçülmemişti. Ayrıca
+#     üretimdekinden farklı bir kimlik modeliyle (google-siglip2) koşulmuştu.
+#   - Üretim modeli (siglip2-animal) ve bu dosyadaki compute_final_score ile
+#     İKİ TARAFLI ölçüldüğünde 0.65 belirgin biçimde daha kötü çıktı:
+#     yanlış alarm %57.7 -> %80.5, buna karşılık yakalama %94.9 -> %96.9.
+#     Yani 22.8 puan yanlış alarmın karşılığı 2 puan yakalama.
+#   - Aynı ölçümün tam taraması (149 negatif, 98 pozitif sorgu):
+#         eşik   yanlış alarm   yakalama
+#         0.65      %80.5         %96.9
+#         0.70      %57.7         %94.9
+#         0.75      %32.9         %90.8
+#         0.80      %13.4         %68.4   <- seçilen
+#         0.85       %3.4         %40.8
+#   ⇒ Yukarıdaki ölçüte göre 0.80. 0.70'te yabancıların YARISINDAN FAZLASI
+#     eşiği geçiyordu; o değerle bildirim özelliği açılsa kullanıcıların
+#     çoğuna yanlış hayvan bildirilirdi. 0.80'de bildirim gitmeyen gerçek
+#     eşleşmeler kayıp değil: "Eşleşmelerim" listesinde görünmeye devam
+#     ediyorlar (bkz. yukarıdaki ölçüt).
+#
+#   Ölçümün iki sınırı, ikisi de 0.80'i ZAYIFLATMIYOR:
+#     - Galeri 50 kimlik; üretimin aday üst sınırı 100 ⇒ ölçtüğümüz boyut
+#       gerçeğe yakın. Galeri büyüdükçe yanlış alarm ARTAR, yani daha yüksek
+#       eşik gerekir — ters yön değil.
+#     - Konum her karşılaştırmada sabit 5 km (veri kümesinde konum yok).
+#       Gerçekte adaylar 25 km'ye kadar dağılıyor ve uzaklık skoru DÜŞÜRÜYOR
+#       ⇒ gerçek yanlış alarm ölçtüğümüzden biraz daha iyi çıkar.
+#   Açık iş: gerçek mesafeler ve daha geniş galeriyle bir kez daha ölçmek.
+#   Ölçüm tabloları docs/olcum-raporu.md §4.1'de.
+#
+# Eşiğin ne demek olduğu için sözleşme §7: `match: true` "kesin aynı hayvan"
+# değil, "bildirim gönderecek kadar eminiz" demektir. Eşiği geçmeyen adaylar
+# arayüzde listelenmeye devam eder — bu yüzden eşiği yükseltmek eşleşmeleri
+# KAYBETTİRMEZ, yalnızca bildirim gönderilenleri azaltır.
+MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.80"))
 
 # Sözleşmede aday üst sınırı 100; burada da zorluyoruz ki gelen liste büyükse
 # sessizce boğulmak yerine kırpıp raporlayalım (bkz. sözleşme §5).
@@ -215,8 +261,19 @@ def adaylari_eslestir(embeddings, labels, species, candidates,
     KATIDIR — sürümü tutmayan aday atlanır, çünkü farklı sürümle üretilmiş
     vektörler kıyaslanamaz ve hata vermeden yanlış benzerlik üretir.
 
+    SORGUNUN kendi embedding'i (aday değil, `embeddings` parametresi) burada,
+    döngüden ÖNCE doğrulanır. Doğrulanmazsa `compute_final_score` her aday
+    için aynı hatayla patlar ve döngüdeki try/except bunu "bu aday bozuk" diye
+    yorumlayıp her adayı `gecersiz_embedding` altında sessizce eler — çağıran
+    tarafın KENDİ isteği bozuk olsa bile sonuç "eşleşme yok" gibi görünür.
+    Burada erken ve açıkça fırlatmak, hatanın doğru yere (çağıran) gitmesini
+    sağlar (bkz. `app/main.py`'deki `/match` ucu, bunu 400'e çeviriyor).
+
     Dönüş: (eşleşmeler, atlananlar)
     """
+    for vektor in _vektor_listesi(embeddings):
+        dogrula_embedding(vektor, "embeddings")
+
     atlanan = {"toplam": 0, "kendisi": 0, "tekrar_eden": 0,
                "model_surumu_uyusmuyor": 0, "gecersiz_embedding": 0,
                "aday_siniri_asildi": 0}
