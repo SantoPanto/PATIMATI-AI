@@ -1,70 +1,306 @@
+import os
 import sys
-import numpy as np
 from pathlib import Path
+
+import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from scripts.model_yarisi import gomucu_kur, veri_yukle
+VERI_ADI = "CatIndividualImages"
+MODEL_ANAHTARI = "siglip2-animal"
+TOHUM = 42
+BIREY_SAYISI = 100
+FOTO_SAYISI = 3
+KONTROL_MESAFESI_KM = 5.0
 
-def main():
-    print("--- AÇIK KÜME (OPEN-SET) 'EŞLEŞME YOK' TESTİ ---")
-    
-    # 1. VERİ VE MODEL YÜKLEME
-    # DogFaceNet yerine CatIndividualImages kullanıyoruz
-    df = veri_yukle("CatIndividualImages", ROOT / "data" / "CatIndividualImages", birey_sayisi=100, foto_sayisi=3, tohum=42)
-    
-    model_anahtari = "google-siglip2"
-    print(f"\nŞampiyon Model Yükleniyor: {model_anahtari}...")
-    gomucu = gomucu_kur(model_anahtari)
-    
-    yollar = df["tam_yol"].tolist()
-    kimlikler = np.array(df["identity"].tolist())
-    
-    print("Fotoğraflar Vektöre Çevriliyor (Bu işlem birkaç saniye sürebilir)...")
-    vektorler = gomucu.kodla(yollar)
-    
-    # 2. VERİYİ "GALERİ" VE "YABANCI SORGULAR" OLARAK İKİYE BÖLME
+# compute_final_score embedding boyutunu app.surum uzerinden dogrular.
+# Bu test siglip2-animal vektorleri urettigi icin matcher'i ayni kimlik
+# modeliyle yukluyoruz.
+os.environ["KIMLIK_MODEL"] = MODEL_ANAHTARI
+
+from app.attributes import attribute_analyzer  # noqa: E402
+from app.embedder import kimlik_gomucu  # noqa: E402
+from app.matcher import compute_final_score  # noqa: E402
+from scripts.model_yarisi import veri_yukle  # noqa: E402
+
+
+def kimlikleri_bol(kimlikler, tohum):
+    """Kimlikleri kayitli/yabanci iki acik-kume parcasina deterministik boler."""
     essiz_kimlikler = np.unique(kimlikler)
     if len(essiz_kimlikler) < 2:
-        print(f"HATA: Open-set testi için en az 2 farklı kimlik gerekir (bulunan: {len(essiz_kimlikler)}).")
-        return
-    np.random.seed(42)
-    np.random.shuffle(essiz_kimlikler)
-    # Hayvanların yarısı veri tabanında (Galeri) var, yarısı ise tamamen YABANCI
-    yari_nokta = len(essiz_kimlikler) // 2
-    kayitli_kimlikler = set(essiz_kimlikler[:yari_nokta])
-    
-    galeri_idx = [i for i, k in enumerate(kimlikler) if k in kayitli_kimlikler]
-    sorgu_idx  = [i for i, k in enumerate(kimlikler) if k not in kayitli_kimlikler]
-    
+        raise ValueError(
+            f"Open-set testi icin en az 2 farkli kimlik gerekir "
+            f"(bulunan: {len(essiz_kimlikler)})."
+        )
+
+    # np.random.default_rng global rastgelelik durumunu degistirmez; ayni tohumla
+    # herkes ayni kayitli/yabanci ayrimini gorur.
+    rng = np.random.default_rng(tohum)
+    karisik_kimlikler = rng.permutation(essiz_kimlikler)
+
+    # Tek sayida kimlik varsa fazla olan taraf yabanci kumede kalir; boylece
+    # acik-kume yanlis alarm testi olabildigince zor kalir.
+    kayitli_sayisi = len(karisik_kimlikler) // 2
+    kayitli_kimlikler = karisik_kimlikler[:kayitli_sayisi]
+    yabanci_kimlikler = karisik_kimlikler[kayitli_sayisi:]
+    return kayitli_kimlikler, yabanci_kimlikler
+
+
+def galeri_ve_sorgulari_sec(kimlikler, kayitli_kimlikler, yabanci_kimlikler):
+    """Galeri, pozitif sorgu ve negatif sorgu indekslerini uretir."""
+    galeri_idx = []
+    pozitif_sorgu_idx = []
+
+    # Her kayitli kimlik icin ilk fotograf galeriye gider; ayni kimligin kalan
+    # fotograflari TPR olcen gercek eslesme sorgulari olur.
+    for kimlik in kayitli_kimlikler:
+        aday_idx = np.flatnonzero(kimlikler == kimlik)
+        if len(aday_idx) < 2:
+            # veri_yukle normalde bunu engeller; yine de script baska veriyle
+            # cagrilirsa sessizce hatali TPR uretmeyelim.
+            continue
+        galeri_idx.append(aday_idx[0])
+        pozitif_sorgu_idx.extend(aday_idx[1:])
+
+    # Yabanci kimliklerin tum fotograflari FPR olcen negatif sorgudur.
+    negatif_sorgu_idx = np.flatnonzero(np.isin(kimlikler, yabanci_kimlikler))
+
+    if not galeri_idx:
+        raise ValueError("Galeri olusturulamadi: kayitli kimliklerde yeterli fotograf yok.")
+    if not pozitif_sorgu_idx:
+        raise ValueError("Pozitif sorgu olusturulamadi: galeri disi kayitli fotograf yok.")
+    if len(negatif_sorgu_idx) == 0:
+        raise ValueError("Negatif sorgu olusturulamadi: yabanci kimlik fotografi yok.")
+
+    return (
+        np.asarray(galeri_idx, dtype=np.int64),
+        np.asarray(pozitif_sorgu_idx, dtype=np.int64),
+        negatif_sorgu_idx.astype(np.int64),
+    )
+
+
+def vektor_listeye_cevir(vektor):
+    """Matcher'in tek-fotograf sozlesmesine uygun Python listesi dondurur."""
+    return np.asarray(vektor, dtype=np.float32).tolist()
+
+
+def fotograflari_analiz_et(yollar):
+    """Her fotograf icin uretimdeki kimlik vektorunu ve etiketleri uretir.
+
+    Kimlik modeli siglip2-animal 768 boyutlu vektor uretir; attribute_analyzer
+    ise etiketleri kendi CLIP vektoruyle cikarir. Bu nedenle kimlik vektoru
+    analyze'a verilmez.
+    """
+    vektorler = []
+    oznitelikler = []
+    for yol in yollar:
+        image_bytes = Path(yol).read_bytes()
+        vektorler.append(kimlik_gomucu.embed_bytes(image_bytes))
+        oznitelikler.append(attribute_analyzer.analyze(image_bytes))
+    return np.asarray(vektorler, dtype=np.float32), oznitelikler
+
+
+def motor_sonucu_hesapla(
+    sorgu_vektoru,
+    galeri_vektoru,
+    sorgu_oznitelikleri,
+    galeri_oznitelikleri,
+):
+    """Gercek urun motorunu foto-grafa ozel etiket ve turlerle cagirir."""
+    return compute_final_score(
+        embeddings_a=vektor_listeye_cevir(sorgu_vektoru),
+        embeddings_b=vektor_listeye_cevir(galeri_vektoru),
+        labels_a=sorgu_oznitelikleri["labels"],
+        labels_b=galeri_oznitelikleri["labels"],
+        # CatIndividualImages konum verisi tasimiyor. Konum katmanini
+        # denetimli tutmak icin ayni mesafe tum karsilastirmalarda kullanilir;
+        # etiket ve tur girdileri ise her fotograf icin gercektir.
+        distance_km=KONTROL_MESAFESI_KM,
+        species_a=sorgu_oznitelikleri["species"],
+        species_b=galeri_oznitelikleri["species"],
+    )
+
+
+def tum_galeri_skorlari_hesapla(
+    sorgu_vektoru,
+    sorgu_oznitelikleri,
+    galeri_vektorleri,
+    galeri_oznitelikleri,
+):
+    """Bir sorguyu galerideki tum adaylara karsi gercek motorla skorlar."""
+    ham_gorsel_skorlar = []
+    hibrit_skorlar = []
+
+    for galeri_vektoru, galeri_ozniteligi in zip(
+        galeri_vektorleri, galeri_oznitelikleri
+    ):
+        sonuc = motor_sonucu_hesapla(
+            sorgu_vektoru,
+            galeri_vektoru,
+            sorgu_oznitelikleri,
+            galeri_ozniteligi,
+        )
+        ham_gorsel_skorlar.append(float(sonuc["visual"]))
+        hibrit_skorlar.append(float(sonuc["score"]))
+
+    return (
+        np.asarray(ham_gorsel_skorlar, dtype=np.float32),
+        np.asarray(hibrit_skorlar, dtype=np.float32),
+    )
+
+
+def skor_dagilimlarini_hesapla(
+    vektorler,
+    oznitelikler,
+    kimlikler,
+    galeri_idx,
+    pozitif_idx,
+    negatif_idx,
+):
+    """Pozitif/negatif ham gorsel ve gercek motor hibrit skorlarini hesaplar."""
     galeri_vektorleri = vektorler[galeri_idx]
-    
-    yabanci_sorgu_vektorleri = vektorler[sorgu_idx]
-    print(f"\nSistemdeki (Galerideki) Hayvan Sayısı: {len(kayitli_kimlikler)} (Toplam {len(galeri_idx)} fotoğraf)")
-    print(f"Sisteme Yabancı (Eşi Olmayan) Hayvan Sayısı: {len(essiz_kimlikler) - len(kayitli_kimlikler)} (Toplam {len(sorgu_idx)} fotoğraf)")
-    
-    # 3. YABANCI SORGULARI GALERİYLE KARŞILAŞTIRMA (TEST AŞAMASI)
-    # Nokta çarpımı (cosine similarity) ile tüm yabancı fotoğrafları galeriyle kıyaslıyoruz
-    benzerlik_matrisi = yabanci_sorgu_vektorleri @ galeri_vektorleri.T
-    
-    # Sistemin yabancı bir hayvana verdiği "EN YÜKSEK" benzerlik skorunu buluyoruz
-    en_yuksek_skorlar = np.max(benzerlik_matrisi, axis=1)
-    
-    esik_degeri = 0.70  # İbrahim'in raporundaki bildirim eşiği
-    
-    # Yabancı bir hayvana %70 ve üzeri skor verirse bu bir YANLIŞ ALARMDIR (False Positive)
-    yanlis_alarmlar = np.sum(en_yuksek_skorlar >= esik_degeri)
-    toplam_yabanci_sorgu = len(en_yuksek_skorlar)
-    yanlis_alarm_orani = (yanlis_alarmlar / toplam_yabanci_sorgu) * 100
-    
-    print(f"\n--- SONUÇLAR (Eşik Değeri: %{int(esik_degeri*100)}) ---")
-    print(f"Test Edilen Yabancı Fotoğraf Sayısı: {toplam_yabanci_sorgu}")
-    print(f"Sistemin Başka Bir Hayvana Benzetip 'Eşleşti!' Diyerek Hata Yaptığı: {yanlis_alarmlar}")
-    print(f"Yanlış Alarm Oranı (False Positive Rate): %{yanlis_alarm_orani:.1f}")
-    
-    print("\n>>> SİSTEMİN GÜVENLE 'EŞLEŞME YOK' DİYEBİLME BAŞARISI (True Negative Rate):")
-    print(f">>> %{100 - yanlis_alarm_orani:.1f} <<<")
+    galeri_oznitelikleri = [oznitelikler[idx] for idx in galeri_idx]
+    galeri_kimlikleri = kimlikler[galeri_idx]
+    galeri_sirasi = {kimlik: i for i, kimlik in enumerate(galeri_kimlikleri)}
+
+    pozitif_ham_skorlar = []
+    pozitif_hibrit_skorlar = []
+    negatif_ham_skorlar = []
+    negatif_hibrit_skorlar = []
+
+    # Pozitif sorguda yalnizca galerideki dogru kimlik olculur. Dogru kimligi
+    # secmek metrik duzeneginin isidir; motor_sonucu_hesapla bu bilgiyi almaz.
+    for sorgu_idx in pozitif_idx:
+        kimlik = kimlikler[sorgu_idx]
+        if kimlik not in galeri_sirasi:
+            raise ValueError(f"Pozitif sorgu icin galeride kimlik bulunamadi: {kimlik}")
+
+        galeri_sira = galeri_sirasi[kimlik]
+        sonuc = motor_sonucu_hesapla(
+            vektorler[sorgu_idx],
+            galeri_vektorleri[galeri_sira],
+            oznitelikler[sorgu_idx],
+            galeri_oznitelikleri[galeri_sira],
+        )
+        pozitif_ham_skorlar.append(float(sonuc["visual"]))
+        pozitif_hibrit_skorlar.append(float(sonuc["score"]))
+
+    # Negatif sorguda sistemin dusebilecegi en buyuk tuzagi olcuyoruz:
+    # yabanci fotografin tum galeriyle skorlarindan maksimum olanlari.
+    for sorgu_idx in negatif_idx:
+        ham_skorlar, hibrit_skorlar = tum_galeri_skorlari_hesapla(
+            vektorler[sorgu_idx],
+            oznitelikler[sorgu_idx],
+            galeri_vektorleri,
+            galeri_oznitelikleri,
+        )
+        negatif_ham_skorlar.append(float(np.max(ham_skorlar)))
+        negatif_hibrit_skorlar.append(float(np.max(hibrit_skorlar)))
+
+    return (
+        np.asarray(pozitif_ham_skorlar, dtype=np.float32),
+        np.asarray(negatif_ham_skorlar, dtype=np.float32),
+        np.asarray(pozitif_hibrit_skorlar, dtype=np.float32),
+        np.asarray(negatif_hibrit_skorlar, dtype=np.float32),
+    )
+
+
+def tablo_bas(baslik, pozitif_skorlar, negatif_skorlar):
+    """Esik taramasi icin FPR ve TPR tablosunu basar."""
+    esikler = np.round(np.arange(0.50, 0.951, 0.05), 2)
+
+    # Karsilastirmalari tek seferde matris olarak yapiyoruz. Satir: esik,
+    # sutun: sorgu. Ortalama, ilgili oranin dogrudan vektorel hesabidir.
+    negatif_gecer = negatif_skorlar[None, :] >= esikler[:, None]
+    pozitif_gecer = pozitif_skorlar[None, :] >= esikler[:, None]
+
+    yanlis_alarm_sayilari = np.sum(negatif_gecer, axis=1)
+    gercek_yakalama_sayilari = np.sum(pozitif_gecer, axis=1)
+    fpr_oranlari = yanlis_alarm_sayilari / len(negatif_skorlar)
+    tpr_oranlari = gercek_yakalama_sayilari / len(pozitif_skorlar)
+
+    print(f"\n--- {baslik} ---")
+    print("| Esik | FPR (Yanlis Alarm) | TPR (Gercek Yakalama) |")
+    print("|---:|---:|---:|")
+    for esik, fp, tp, fpr, tpr in zip(
+        esikler,
+        yanlis_alarm_sayilari,
+        gercek_yakalama_sayilari,
+        fpr_oranlari,
+        tpr_oranlari,
+    ):
+        print(
+            f"| {esik:.2f} | "
+            f"{fp}/{len(negatif_skorlar)} (%{fpr * 100:.1f}) | "
+            f"{tp}/{len(pozitif_skorlar)} (%{tpr * 100:.1f}) |"
+        )
+
+
+def main():
+    print("--- ACIK KUME (OPEN-SET) TPR ve FPR OLCUM TESTI ---")
+
+    # 1) Veri kumesini yukle: her kimlikten en fazla FOTO_SAYISI fotograf alinir.
+    # En az iki fotograflik kimlikler secildigi icin bir fotografi galeriye,
+    # kalanlari pozitif sorguya ayirabiliyoruz.
+    df = veri_yukle(
+        VERI_ADI,
+        ROOT / "data" / VERI_ADI,
+        birey_sayisi=BIREY_SAYISI,
+        foto_sayisi=FOTO_SAYISI,
+        tohum=TOHUM,
+    )
+
+    kimlikler = np.asarray(df["identity"].to_numpy())
+    yollar = df["tam_yol"].tolist()
+
+    # 2) Kimlikleri acik-kume mantigiyla ikiye bol:
+    # kayitli kimlikler galeride yer alir, yabanci kimlikler galeride hic yoktur.
+    kayitli_kimlikler, yabanci_kimlikler = kimlikleri_bol(kimlikler, TOHUM)
+    galeri_idx, pozitif_idx, negatif_idx = galeri_ve_sorgulari_sec(
+        kimlikler, kayitli_kimlikler, yabanci_kimlikler
+    )
+
+    print(f"\nVeri kumesi: {VERI_ADI}")
+    print(f"Model: {MODEL_ANAHTARI}")
+    print(f"Kayitli kimlik: {len(kayitli_kimlikler)}")
+    print(f"Yabanci kimlik: {len(yabanci_kimlikler)}")
+    print(f"Galeri fotografi: {len(galeri_idx)}")
+    print(f"Pozitif sorgu fotografi (TPR): {len(pozitif_idx)}")
+    print(f"Negatif sorgu fotografi (FPR): {len(negatif_idx)}")
+    print("Gercek motor girdileri: etiketler ve turler her fotograf icin "
+          "attribute_analyzer ile uretilir; "
+          f"kontrol mesafesi {KONTROL_MESAFESI_KM:.1f} km.")
+
+    # 3) Her fotoğrafı üretimdeki kimlik gömücüsü ve etiketçiyle analiz et;
+    # sonra skorları ürün motorunun compute_final_score fonksiyonuyla hesapla.
+    print(f"\nModel yukleniyor: {MODEL_ANAHTARI}...")
+    print("Fotograflar vektore cevriliyor ve etiketleniyor...")
+    vektorler, oznitelikler = fotograflari_analiz_et(yollar)
+
+    (
+        pozitif_ham_skorlar,
+        negatif_ham_skorlar,
+        pozitif_hibrit_skorlar,
+        negatif_hibrit_skorlar,
+    ) = skor_dagilimlarini_hesapla(
+        vektorler,
+        oznitelikler,
+        kimlikler,
+        galeri_idx,
+        pozitif_idx,
+        negatif_idx,
+    )
+
+    # 4) Iki ayri esik taramasi: biri yalnizca ham gorsel skor, digeri gercek
+    # motorun hibrit skoru. Esikler 0.50-0.95 araliginda 0.05 adimlidir.
+    tablo_bas("TABLO 1: SADECE HAM GORSEL SKOR", pozitif_ham_skorlar, negatif_ham_skorlar)
+    tablo_bas(
+        "TABLO 2: GERCEK MOTOR - HIBRIT SKOR",
+        pozitif_hibrit_skorlar,
+        negatif_hibrit_skorlar,
+    )
+
 
 if __name__ == "__main__":
     main()

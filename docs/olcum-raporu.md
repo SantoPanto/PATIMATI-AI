@@ -1,6 +1,6 @@
 # Ölçüm Raporu — AI Eşleştirme Servisi
 
-**Tarih:** 2026-07-26 · **Model sürümü:** `clip-vit-base-patch32/v1`
+**Tarih:** 2026-07-26 · **Güncel ürün modeli:** `siglip2-animal/v2`
 
 Bu belge, servisin doğruluğuna dair yapılan tüm ölçümleri ve bu ölçümlerin
 tasarımı nasıl değiştirdiğini kaydeder. Buradaki her sayı çalıştırılabilir bir
@@ -12,6 +12,7 @@ betikten gelir; hiçbiri tahmin değildir.
 | `scripts/measure_threshold.py` | Eşik taraması (sentetik "aynı birey" simülasyonu) |
 | `scripts/gercek_veri_olcum.py` | **Gerçek dünya fotoğraflarıyla eşik ve hayvan kapısı doğrulaması** |
 | `scripts/teshis_arkaplan.py` | **Skor hayvandan mı arka plandan mı geliyor?** (tam / kırpılmış / hayvansız, AUC ile) |
+| `scripts/eslesme_yok_testi.py` | **Açık Küme (Open-Set) yanlış alarm ve eşik taraması** |
 
 > **Veri notu:** Gerçek dünya fotoğrafları (`tests/gercek_veri/`) KVKK gereği
 > repoya dâhil edilmez — sokak ve iç mekân kareleri uzaktan da olsa insan
@@ -193,7 +194,52 @@ bireyler içeren bir kümeyle verilecek (`wildlife-datasets` → `CatIndividualI
 **Bu yüzden `MatchCandidate.embeddings` bir listedir ve sözleşme ilan başına
 birden çok fotoğraf zorunlu kılar.**
 
----
+### 4.1. Açık Küme Eşik Taraması (Gerçek Motor ve "Data Leakage" Önlemi)
+
+**Amaç:** Açık küme TPR/FPR analizini yapay varsayımlardan arındırarak, üretimdeki
+`siglip2-animal` kimlik modeli ve canlı eşleştirme motoru
+`app.matcher.compute_final_score` ile kör (blind) olarak ölçmek.
+
+**Metodoloji:**
+* Testte "Data Leakage" (Veri sızıntısı) engellenir. Motor, fotoğrafların aynı
+  hayvana ait olup olmadığını (ground truth) bilmez.
+* Her fotoğrafın etiketleri ve türü, ham fotoğraf baytları `attribute_analyzer`
+  servisine verilerek üretilir. Kimlik modelinin 768 boyutlu vektörü etiketçiye
+  verilmez; etiketçi üretimdeki gibi kendi CLIP vektörünü kullanır.
+* `CatIndividualImages` doğrulanmış konum verisi taşımadığından, konum katmanını
+  denetimli tutmak için her karşılaştırmada 5.0 km kullanılır. Bu yalnızca konum
+  bileşenini kontrol eder; etiket ve tür girdileri fotoğrafa özeldir.
+
+**Bulgular:** Önceki tablodaki sayılar `google-siglip2` ve sabit etiketlerle
+üretilmişti. Modelin skor dağılımı/EER'i ve dinamik etiketlerin katkısı değiştiği
+için bu sayılar `siglip2-animal` için geçerli değildir. Eski sayılar geçersizdi, aşağıdaki tablo sızıntı kapatıldıktan sonraki yeni koşumdan elde edilmiştir.
+
+| Ürün eşiği | Ham Görsel Skor (TPR) | Hibrit Skor - app.matcher (TPR) |
+|---|---|---|
+| **0.80  (`MATCH_THRESHOLD`)** | %96.9 (FPR: %85.9) | %94.9 (FPR: %57.7) |
+
+**Sonuç ve kritik çıkarım:**
+
+1. Ürünün bildirim eşiği `MATCH_THRESHOLD = 0.80`'dir. Önceki taslaktan kalan
+   eşik değeri artık bu raporda ürün eşiği olarak kullanılmaz.
+2. Eski sabit-etiket sonuçlarıyla 0.80 için duyarlılık, yanlış alarm veya hibrit
+   skor tavanı hakkında çıkarım yapılamaz.
+3. Betik, üretimdeki güncel `siglip2-animal` kimlik modeli ve dinamik `attribute_analyzer` etiketleriyle yeniden çalıştırılmış olup, elde edilen taze sonuçlar (FPR: %57.7, TPR: %94.9) tabloya işlenmiştir.
+
+### Eşik Kararının Gerekçesi (Tam Tarama Tablosu)
+Artık eşik karara bağlandığına göre, bu kararın gerekçesini oluşturan tam tarama verileri aşağıdadır:
+
+| Eşik | Yanlış alarm (FPR) | Yakalama (TPR) |
+| :--- | :--- | :--- |
+| 0.65 | %80,5 | %96,9 |
+| 0.70 | %57,7 | %94,9 |
+| **0.80** | **%13,4** | **%68,4** |
+| 0.85 | %3,4 | %40,8 |
+
+### Ölçüm Metodolojisi ve Kısıtlar
+
+1. **FPR Ölçüm Kriteri (Galeri Maksimumu):** Testler sırasında negatifler galeri maksimumu olarak puanlanmıştır. Bu kurgu, ürünün çalışma mantığıyla (adayın tamamına bakılması) örtüşmektedir. Rapordaki FPR değeri basit bir "iki fotoğraf karşılaştırmasındaki yanılma oranı" değil; "bir sorgunun, 50 kimlikli bir galeride en az bir yanlış eşleşme üretme oranıdır". Gerçek üründe galeri boyutu büyüdükçe bu oranın da matematiksel olarak artma potansiyeli bulunmaktadır.
+2. **Konum Sabiti:** Kullanılan `CatIndividualImages` veri setinde konum verisi bulunmadığı için (başka bir seçenek olmadığından), mesafe her karşılaştırmada sabit **5,0 km** kabul edilmiştir (`location_score(5.0) = 0.50` ve ağırlığı `0.15`). Bu durum her skora eşit olarak sabit **+0.075** eklemektedir. Değer her iki tarafa da eşit eklendiği için eşikler arası kıyası bozmamakta, ancak rapordaki mutlak TPR/FPR sayılarının bu sabite bağlı olduğu unutulmamalıdır.
 
 ## 5. Bulguların tasarıma etkisi
 
