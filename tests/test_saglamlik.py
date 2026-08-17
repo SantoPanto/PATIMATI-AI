@@ -58,6 +58,67 @@ def test_sonsuz_mesafe():
     assert location_score(float("nan")) == 0.0
 
 
+def test_mesafe_bilinmiyorsa_sifir():
+    """Eksik mesafe GEÇERSİZ mesafeyle aynı davranmalı.
+
+    Eskiden `MatchCandidate.distance_km` varsayılanı 0.0 idi ve
+    `location_score(0.0)` maksimum puandır (1.0). Yani alanı hiç göndermeyen
+    çağıran, "mesafeyi bilmiyorum"un karşılığı olarak EN İYİ konum puanını
+    alıyordu.
+    """
+    assert location_score(None) == 0.0
+
+
+def test_aday_mesafesiz_kurulabilir_ve_none_olur():
+    """Varsayılan artık 0.0 değil None — "0 km" ile "bilinmiyor" ayrı şeyler."""
+    mesafesiz = MatchCandidate(ad_id=1, embeddings=[vektor()], labels=["cat"],
+                               species="cat", model_version=MODEL_SURUMU)
+    assert mesafesiz.distance_km is None
+
+
+def test_eksik_mesafe_gecersiz_mesafeyle_ayni_skoru_verir():
+    """Asıl iddia: "eksik" ile "geçersiz" AYNI yoldan geçmeli.
+
+    Ayrı bir dal açılırsa (ör. None için başka bir puan) bu eşitlik bozulur.
+    """
+    a, b = vektor(1), vektor(2)
+    mesafesiz = MatchCandidate(ad_id=1, embeddings=[b], labels=["cat"],
+                               species="cat", model_version=MODEL_SURUMU)
+
+    def skorla(mesafe):
+        return compute_final_score(a, b, ["cat"], ["cat"], mesafe, "cat", "cat")
+
+    eksik = skorla(mesafesiz.distance_km)
+    assert eksik == skorla(float("nan"))
+    assert eksik == skorla(float("inf"))
+    assert eksik["location"] == 0.0
+
+
+def test_mesafesiz_aday_gercek_eslestirme_yolundan_gecer():
+    """Skorlama fonksiyonu değil, adayı ÜRÜNDEKİ yoldan geçirir.
+
+    `adaylari_eslestir` mesafeyi `aday.distance_km` üzerinden okur; bu test o
+    aktarımı da kapsar, yoksa yalnız `compute_final_score` sınanmış olurdu.
+    """
+    mesafesiz = MatchCandidate(ad_id=7, embeddings=[vektor(3)], labels=["cat"],
+                               species="cat", model_version=MODEL_SURUMU)
+    sonuclar, _ = adaylari_eslestir(vektor(1), ["cat"], "cat", [mesafesiz],
+                                    model_version=MODEL_SURUMU)
+    assert len(sonuclar) == 1
+    assert sonuclar[0]["location"] == 0.0
+
+
+def test_acik_sifir_km_hala_maksimum():
+    """Karşıt kontrol: AÇIKÇA verilen 0.0 meşru "aynı noktada" demektir.
+
+    Düzeltme yalnız bilginin HİÇ olmadığı durumu değiştirmeli; 0 km'yi de
+    cezalandırırsa aynı sokakta bulunan hayvan puan kaybeder.
+    """
+    assert location_score(0.0) == 1.0
+    a, b = vektor(1), vektor(2)
+    assert compute_final_score(a, b, ["cat"], ["cat"], 0.0, "cat", "cat")["location"] == 1.0
+
+
 # --------------------------------------------------------------------------
 # Embedding doğrulaması
 # --------------------------------------------------------------------------
