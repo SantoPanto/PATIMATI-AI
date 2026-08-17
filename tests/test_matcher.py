@@ -75,3 +75,39 @@ def test_gercek_tur_uyusmazligi_hala_engelleniyor():
     r = compute_final_score(emb, emb, ["cat"], ["dog"], 0.0, "CAT", "DOG")
     assert r["blocked_reason"] == "species_mismatch"
     assert r["score"] == 0.0
+
+
+# --------------------------------------------------------------------------
+# Faz 2 — isteğe özel eşik (kaynak bazlı kalibrasyon, ör. Instagram)
+# --------------------------------------------------------------------------
+
+def test_threshold_verilmezse_modul_varsayilani_kullanilir():
+    """threshold=None -> davranış MATCH_THRESHOLD ile birebir aynı kalmalı
+    (native çağıranlar için sıfır davranış değişikliği)."""
+    from app.matcher import MATCH_THRESHOLD
+    emb = make_embedding()
+    r_varsayilan = compute_final_score(emb, emb, ["cat"], ["cat"], 0.0, "cat", "cat")
+    r_acik = compute_final_score(emb, emb, ["cat"], ["cat"], 0.0, "cat", "cat",
+                                 threshold=MATCH_THRESHOLD)
+    assert r_varsayilan["match"] == r_acik["match"]
+    assert r_varsayilan["score"] == r_acik["score"]
+
+
+def test_ozel_threshold_karari_degistirir():
+    # Farklı iki vektör kullan: kimlikle eşleşme skoru 1.0 tavanına çarpar ve
+    # "hemen üstünde bir eşik" diye bir şey kalmaz. Farklı vektörler orta
+    # aralıkta, tavana yapışmayan bir skor verir.
+    a, b = make_embedding(1), make_embedding(2)
+    r = compute_final_score(a, b, ["cat"], ["cat"], 0.0, "cat", "cat")
+    skor = r["score"]
+    assert 0.0 < skor < 1.0, "test orta aralıkta bir skor varsayıyor"
+
+    # Skorun hemen üstünde bir eşik: artık eşleşmemeli.
+    assert compute_final_score(
+        a, b, ["cat"], ["cat"], 0.0, "cat", "cat",
+        threshold=skor + 0.01)["match"] is False
+
+    # Skorun hemen altında bir eşik: eşleşmeli.
+    assert compute_final_score(
+        a, b, ["cat"], ["cat"], 0.0, "cat", "cat",
+        threshold=skor - 0.01)["match"] is True
