@@ -12,6 +12,7 @@ taklit edilir: burada sınanan uç noktaların HTTP sözleşmesi (durum kodu, ce
 gerçek seed veriyle ayrıca sınanıyor.
 """
 import io
+import json
 
 import numpy as np
 import pytest
@@ -210,3 +211,29 @@ def test_analyze_url_basarili_analiz_sonucu_doner(monkeypatch):
 def test_analyze_url_bos_liste_pydantic_tarafindan_reddedilir():
     r = client.post("/analyze_url", json={"photo_urls": []})
     assert r.status_code == 422
+
+
+# --------------------------------------------------------------------------
+# OpenAPI şeması
+# --------------------------------------------------------------------------
+
+def test_openapi_semasi_kati_json_olarak_uretilebilir():
+    """Hiçbir alan varsayılanı JSON'a çevrilemeyen bir değer olmamalı.
+
+    Ölçülerek bulundu: `MatchCandidate.distance_km` varsayılanını
+    `float("nan")` yapmak cazip görünüyordu — eksik mesafe böylece
+    `location_score`'un mevcut "sonlu değil" dalından geçer, yeni dal
+    gerekmezdi. Ama pydantic varsayılanı OpenAPI şemasına koyuyor
+    (`{'default': nan, ...}`) ve Starlette'in JSONResponse'u
+    `json.dumps(..., allow_nan=False)` kullanıyor ⇒ `/openapi.json` 500 verir
+    ve `/docs` tamamen ölür. Tasarım bu ölçüm yüzünden `None`'a çevrildi.
+
+    Bu test yalnız MatchCandidate'i değil TÜM şemayı kapsar; aynı tuzağa
+    başka bir modelde düşülmesini de engeller.
+    """
+    r = client.get("/openapi.json")
+    assert r.status_code == 200
+
+    # TestClient gövdeyi zaten çözdü; asıl kontrol KATI JSON'a geri çevrilebilmesi.
+    # (json.dumps varsayılanı NaN/Infinity'yi sessizce yazar, allow_nan=False yazmaz.)
+    json.dumps(r.json(), allow_nan=False)
