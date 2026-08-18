@@ -16,6 +16,7 @@ import json
 
 import numpy as np
 import pytest
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from PIL import Image
 
@@ -237,3 +238,109 @@ def test_openapi_semasi_kati_json_olarak_uretilebilir():
     # TestClient gövdeyi zaten çözdü; asıl kontrol KATI JSON'a geri çevrilebilmesi.
     # (json.dumps varsayılanı NaN/Infinity'yi sessizce yazar, allow_nan=False yazmaz.)
     json.dumps(r.json(), allow_nan=False)
+
+
+# --------------------------------------------------------------------------
+# A1 — uçların kimliği (paylaşılan anahtar)
+# --------------------------------------------------------------------------
+
+ANAHTAR = "cok-gizli-anahtar"
+
+#: Kimlik isteyen uçlar. `/health` bilerek dışarıda: canlılık yoklaması
+#: kimlik isteseydi, doğru çalışan servis "ölü" görünürdü.
+KORUNAN_UCLAR = ["/analyze", "/analyze_url", "/compare", "/match"]
+
+
+@pytest.mark.parametrize("yol", KORUNAN_UCLAR)
+def test_anahtar_yapilandirilmamissa_uc_401_vermez(monkeypatch, yol):
+    """Anahtar verilmediğinde BUGÜNKÜ davranış aynen sürmeli.
+
+    A1 üç depoya yayılıyor ve bu servis şu an tarayıcıdan da çağrılıyor.
+    Anahtarı bir anda zorunlu kılmak ilan oluşturma ekranını kırardı; bu test
+    o kırılmanın sessizce geri gelmesini engelliyor.
+    """
+    monkeypatch.delenv("AI_API_KEY", raising=False)
+
+    r = client.post(yol)
+
+    assert r.status_code != 401, (
+        f"{yol} anahtar YAPILANDIRILMADIĞI hâlde 401 verdi — çağıranlar "
+        f"backend'e geçmeden kilit kapandı, /add-listing kırılır.")
+
+
+@pytest.mark.parametrize("yol", KORUNAN_UCLAR)
+def test_anahtar_varken_anahtarsiz_istek_reddedilir(monkeypatch, yol):
+    monkeypatch.setenv("AI_API_KEY", ANAHTAR)
+
+    r = client.post(yol)
+
+    assert r.status_code == 401, (
+        f"{yol} anahtar zorunluyken anahtarsız isteği kabul etti "
+        f"(durum {r.status_code}). Uç korumasız kalmış olabilir.")
+
+
+@pytest.mark.parametrize("yol", KORUNAN_UCLAR)
+def test_yanlis_anahtar_reddedilir(monkeypatch, yol):
+    """Yalnız son harfin BÜYÜKLÜĞÜ farklı: ön ek ya da harf duyarsız eşleşme yok."""
+    monkeypatch.setenv("AI_API_KEY", ANAHTAR)
+
+    r = client.post(yol, headers={"X-Api-Key": "cok-gizli-anahtaR"})
+
+    assert r.status_code == 401, f"{yol} yanlış anahtarı kabul etti."
+
+
+def test_dogru_anahtar_gecer(monkeypatch, sahte_model):
+    """Ön koşul: kilit yalnızca reddetmiyor, DOĞRU anahtarla geçiriyor da.
+
+    Bu olmadan yukarıdaki üç test "her şeyi reddet" diyen bozuk bir kilitle de
+    yeşil yanardı.
+    """
+    monkeypatch.setenv("AI_API_KEY", ANAHTAR)
+    sahte_model()
+
+    r = client.post("/analyze",
+                    headers={"X-Api-Key": ANAHTAR},
+                    files={"file": ("kedi.jpg", _resim_baytlari(), "image/jpeg")})
+
+    assert r.status_code == 200, f"Doğru anahtarla istek geçmedi: {r.text}"
+    assert len(r.json()["embedding"]) == VEKTOR_BOYUTU
+
+
+def test_health_anahtar_zorunluyken_bile_acik_kalir(monkeypatch):
+    monkeypatch.setenv("AI_API_KEY", ANAHTAR)
+
+    r = client.get("/health")
+
+    assert r.status_code == 200, (
+        "/health kimlik istemeye başladı — canlılık yoklaması artık çalışan "
+        "servisi ölü gösterir.")
+    assert r.json()["api_anahtari_zorunlu"] is True
+
+
+def test_health_kimlik_kapaliyken_gercegi_soyler(monkeypatch):
+    """Sessizce açık kalan kapı, hiç olmayan kapıdan tehlikelidir."""
+    monkeypatch.delenv("AI_API_KEY", raising=False)
+
+    assert client.get("/health").json()["api_anahtari_zorunlu"] is False
+
+
+def test_butun_POST_uclari_korunuyor():
+    """Uç listesi ELLE değil, uygulamanın kendi yönlendirme tablosundan türetilir.
+
+    Elle yazılmış bir liste yalnız bugünü ölçer: yarın eklenen bir uç listeye
+    yazılmadığı sürece korumasız kalır ve hiçbir test bunu söylemez.
+    """
+    korunan, korumasiz = [], []
+    for route in main.app.routes:
+        if not isinstance(route, APIRoute) or "POST" not in route.methods:
+            continue
+        cagrilar = [alt.call for alt in route.dependant.dependencies]
+        (korunan if main.anahtari_dogrula in cagrilar else korumasiz).append(route.path)
+
+    # Ön koşul: türetme çalışmadıysa aşağıdaki iddia HİÇBİR ŞEY kanıtlamaz —
+    # boş liste her zaman "korumasız uç yok" der.
+    assert korunan, "Düzenek bozuk: hiç POST ucu bulunamadı, iddia anlamsız."
+
+    assert korumasiz == [], (
+        f"Kimlik doğrulaması olmayan POST ucu var: {korumasiz}. "
+        f"Yeni uç eklendiyse dependencies=[Depends(anahtari_dogrula)] unutulmuş.")
