@@ -108,13 +108,22 @@ class HttpTextAnalyzer(TextAnalyzer):
             "age_text, pet_name, location_text, location_confidence, event_date, "
             "event_date_estimated, distinguishing_features, pet_count, needs_review."
         )
-        return {"model": self._model, "input": yonerge,
+        return {"model": self._model,
+                "messages": [{"role": "user", "content": yonerge}],
                 "response_format": {"type": "json_object"}}
 
     def _yaniti_ayristir(self, veri: dict) -> TextAnalysisResult:
         # Sağlayıcılar arası zarf biçimi değişir; burada tek bir dar nokta var
-        # ki sağlayıcı değişince tek yer güncellensin.
-        icerik = veri.get("output") if isinstance(veri, dict) else None
+        # ki sağlayıcı değişince tek yer güncellensin. Standart chat/completions
+        # zarfı (OpenAI, Gemini'nin OpenAI-uyumlu katmanı, çoğu yerel sunucu):
+        # {"choices": [{"message": {"content": "<json string>"}}]}.
+        icerik = None
+        if isinstance(veri, dict):
+            secenekler = veri.get("choices")
+            if isinstance(secenekler, list) and secenekler:
+                ilk = secenekler[0]
+                mesaj = ilk.get("message") if isinstance(ilk, dict) else None
+                icerik = mesaj.get("content") if isinstance(mesaj, dict) else None
         if isinstance(icerik, str):
             import json
             icerik = json.loads(icerik)
