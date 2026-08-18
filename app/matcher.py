@@ -135,7 +135,7 @@ def jaccard_score(labels_a: list, labels_b: list) -> float:
     return intersection / union if union > 0 else 0.0
 
 
-def location_score(distance_km: float) -> float:
+def location_score(distance_km: float | None) -> float:
     """
     Mesafe bazlı skor: yakınsa yüksek, uzaksa düşük.
     0 km → 1.00, 5 km → 0.50, 20 km → 0.20, 50 km → 0.09
@@ -143,8 +143,17 @@ def location_score(distance_km: float) -> float:
     Negatif mesafe fiziksel olarak anlamsızdır ama gelirse iki ayrı hataya yol
     açıyordu: -5 km ZeroDivisionError ile servisi çökertiyor, -1 km ise 1.25
     döndürüp skoru üst sınırın üstüne çıkarıyordu. Sıfıra kırpıyoruz.
+
+    None = mesafe BİLİNMİYOR ve GEÇERSİZ mesafeyle (NaN/inf) aynı davranır.
+    Sebebi: konum skoru toplamın %15'i ve 0 km maksimum puan demek. Alanı hiç
+    göndermeyen bir çağıran, "bilmiyorum"un karşılığı olarak sessizce EN İYİ
+    puanı alıyordu — eşiğin 0.80 olduğu bir sistemde 0.15'lik sessiz bonus,
+    0.65 ile 0.80 arasındaki tüm farktan büyük.
+
+    ⚠ Açıkça verilen 0.0 hâlâ meşru "aynı noktada" demektir ve 1.0 döndürür;
+    değişen yalnızca bilginin HİÇ olmadığı durum.
     """
-    if not np.isfinite(distance_km):
+    if distance_km is None or not np.isfinite(distance_km):
         return 0.0
     return 1.0 / (1.0 + max(0.0, float(distance_km)) / 5.0)
 
@@ -154,7 +163,7 @@ def compute_final_score(
     embeddings_b,
     labels_a: list,
     labels_b: list,
-    distance_km: float,
+    distance_km: float | None,
     species_a: str = "unknown",
     species_b: str = "unknown",
     threshold: float | None = None,

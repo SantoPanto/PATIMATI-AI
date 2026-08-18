@@ -41,7 +41,11 @@ class MatchCandidate(BaseModel):
     embeddings: list[list[float]] = Field(min_length=1)
     labels: list[str] = Field(default_factory=list)
     species: str = "unknown"
-    distance_km: float = 0.0
+    # None = mesafe BİLİNMİYOR. "0 km" DEĞİL — eskiden varsayılan 0.0 idi ve
+    # location_score(0.0) maksimum puan (1.0) döndürdüğü için alanı hiç
+    # göndermeyen bir çağıran skoruna sessizce +0.15'e kadar bonus alıyordu.
+    # Artık eksik mesafe, geçersiz mesafeyle (NaN/inf) aynı davranır: 0.0.
+    distance_km: float | None = None
     # Adayın vektörü hangi model sürümüyle üretildi. Farklıysa aday ATLANIR:
     # farklı sürümlerin vektörleri kıyaslanamaz ve sessizce yanlış sonuç üretir.
     # None → sürüm bilinmiyor, eski kayıt sayılır ve yine atlanır.
