@@ -393,6 +393,21 @@ yazmaya gerek yok.
 
 - AI servisi **iç ağda** kalmalı, internete açık olmamalıdır. Zorunlu olarak
   açılacaksa paylaşılan bir gizli anahtar başlığı istenir.
+
+  ✅ **Uygulandı (A1).** `AI_API_KEY` verilirse `/analyze`, `/analyze_url`,
+  `/compare` ve `/match` uçları **`X-Api-Key`** başlığı ister; eşleşmezse
+  `401 UNAUTHORIZED`. Karşılaştırma sabit zamanlıdır. `/health` bilerek
+  anahtarsızdır — canlılık yoklaması kimlik isteseydi çalışan servis "ölü"
+  görünürdü.
+
+  > ⚠️ **`AI_API_KEY` verilmezse uçlar KİMLİKSİZ çalışır.** Bu bilinçli:
+  > servis bugün tarayıcıdan da çağrılıyor (`AddListingPage`) ve anahtarı bir
+  > anda zorunlu kılmak ilan oluşturma ekranını kırardı. Zorunluluk, çağıranların
+  > hepsi backend üzerinden geçtikten sonra değişken verilerek açılır.
+  > **Ama durum sessiz değildir:** açılışta uyarı günlüğe yazılır ve `/health`
+  > `api_anahtari_zorunlu` alanıyla gerçeği söyler. Değişkeni yazmayı unutan bir
+  > dağıtım, `PHOTO_ALLOWED_HOSTS`'ta bir kez yaşandığı gibi, korumanın açık
+  > olduğunu sanarak kapalı çalışmasın.
 - **Fotoğraflar kendi alan adımızın alt alan adından sunulacak** (karar: Fatih,
   2026-07-29). Ham S3 adresi (`patimati-media.s3.eu-central-1.amazonaws.com`)
   yerine `cdn.<alanadi>` / `media.<alanadi>` gibi bir adres belirlenecek; DNS'te
