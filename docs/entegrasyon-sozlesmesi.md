@@ -176,6 +176,7 @@ Python → Java.
       "photo_b": 2
     }
   ],
+  "match_threshold": 0.80,
   "skipped_candidates": {
     "toplam": 2,
     "kendisi": 0,
@@ -201,6 +202,7 @@ Python → Java.
 | `matches` | Skora göre azalan sıralı, en fazla 20 kayıt. Aday yoksa boş dizi. |
 | `skipped_candidates` | Elenen adayların gerekçeli sayımı. "Hiç eşleşme çıkmadı" durumunun sebebi görünür olsun diye vardır — özellikle `model_surumu_uyusmuyor` sıfırdan büyükse ilgili ilanların yeniden analiz edilmesi gerekir. |
 | `matches[].match` | `score >= eşik` ise `true`. Eşik AI tarafında ortam değişkeniyle ayarlanır. |
+| `match_threshold` | **Bu koşumda kullanılan eşiğin kendisi.** `matches[].match` bunun sonucudur ve eşik zamanla değişir (0.70 → 0.80, ölçüm sonucu). Java bunu `ad_match.threshold_at_time` sütununa yazar: kayıt "bu eşleşme üretilirken eşik neydi" sorusuna sonradan doğru cevap verebilsin diye. Değer `MATCH_THRESHOLD`'dan gelir; **yukarıdaki örnekteki sayı yalnızca gösterimdir**, tek kaynak koddur. |
 | `matches[].visual/label/location` | Skorun bileşenleri — hata ayıklama ve arayüzde gerekçe göstermek için. |
 
 ### Hatalı

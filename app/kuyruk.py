@@ -46,7 +46,7 @@ from .topoloji import (AMQP_URL, DLQ, DLX, EXCHANGE, ISTEK_ANAHTARI,  # noqa: F4
 from .analiz import urlleri_analiz_et
 from .hatalar import (AIHatasi, DesteklenmeyenSema, GecersizEmbedding,
                       GecersizIstek, ModelHatasi)
-from .matcher import adaylari_eslestir
+from .matcher import MATCH_THRESHOLD, adaylari_eslestir
 from .models import KuyrukIstegi
 from .surum import MODEL_SURUMU
 
@@ -168,6 +168,14 @@ def istegi_isle(mesaj: dict) -> dict:
             "nlp_attributes": {},
             "extracted_features": [],
             "matches": matches,
+            # Sözleşmede yok ama eklemek kırıcı değil (§9). `match` bayrağı
+            # "score >= eşik" demektir ve eşik ZAMANLA DEĞİŞİYOR (0.70 → 0.80,
+            # PR #17 — ölçüm sonucuydu, sabit değil). Java kaydı "bu eşleşme
+            # üretilirken eşik neydi" bilgisini saklıyor (`ad_match.threshold_at_time`,
+            # NOT NULL). Değer buradan gitmezse Java ya kaydı yazamaz ya da
+            # ikinci bir yerden tahmin eder — iki kaynak sessizce kayar ve
+            # kayıt geçmişe dair YANLIŞ konuşur.
+            "match_threshold": MATCH_THRESHOLD,
             "skipped_candidates": atlanan,
             # Sözleşmede yok ama eklemek kırıcı değil (§9): indirilemeyen
             # fotoğraflar sessizce kaybolmasın. Kullanıcı 3 fotoğraf yükleyip
