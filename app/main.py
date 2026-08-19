@@ -1,10 +1,11 @@
 # app/main.py
 import logging
 import os
+import secrets
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 
@@ -22,9 +23,57 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+ANAHTAR_BASLIGI = "X-Api-Key"
+
+
+def api_anahtari() -> str:
+    """Yapılandırılmış paylaşılan sır; boşsa kimlik doğrulaması KAPALIDIR.
+
+    Her çağrıda okunur, modül yüklenirken bir kez değil: değeri sabitlemek
+    testlerin ortamı değiştirmesini imkânsız kılar ve "açık mı kapalı mı"
+    sorusunun cevabı yalnızca yeniden başlatmayla değişebilirdi.
+    """
+    return os.getenv("AI_API_KEY", "").strip()
+
+
+async def anahtari_dogrula(
+    x_api_key: str | None = Header(default=None, alias=ANAHTAR_BASLIGI),
+) -> None:
+    """Uçları paylaşılan bir sırla korur (A1).
+
+    ANAHTAR YAPILANDIRILMAMIŞSA hiçbir şey doğrulanmaz. Böyle olmasının
+    sebebi dağıtım sırası: bu servis bugün tarayıcıdan da çağrılıyor
+    (`AddListingPage`), ve anahtarı bir anda zorunlu kılmak ilan oluşturma
+    ekranını kırardı. Zorunluluk, çağıranların hepsi backend üzerinden
+    geçtikten sonra `AI_API_KEY` verilerek açılır.
+
+    ⚠ Ama bu durum SESSİZ değildir: açılışta uyarı yazılır ve `/health`
+    gerçeği söyler. Sessizce açık kalan bir kapı, hiç olmayan kapıdan
+    tehlikelidir — kimse eksikliğini fark etmez.
+
+    Karşılaştırma sabit zamanlıdır: sıradan `==` ilk farklı bayta kadar geçen
+    süreyi sızdırır ve anahtar bayt bayt tahmin edilebilir hâle gelir.
+    """
+    beklenen = api_anahtari()
+    if not beklenen:
+        return
+
+    gelen = x_api_key or ""
+    if not secrets.compare_digest(gelen.encode("utf-8"), beklenen.encode("utf-8")):
+        # Eksik ile yanlış anahtar AYNI cevabı alır: hangisinin olduğunu
+        # söylemek, saldırgana anahtarın var olup olmadığını öğretirdi.
+        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED",
+                                                     "message": "Gecersiz veya eksik API anahtari"})
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("AI servisi başlatılıyor...")
+    if not api_anahtari():
+        logger.warning(
+            "AI_API_KEY tanımlı DEĞİL: /analyze, /analyze_url, /compare ve /match "
+            "uçları KİMLİKSİZ çalışıyor. Çağıranlar backend üzerinden geçtikten "
+            "sonra bu değişken verilmeli.")
     yield
     logger.info("AI servisi kapatılıyor.")
 
@@ -48,12 +97,18 @@ async def health():
     # Eşik de aynı sebeple burada: ortam değişkeniyle eziliyor, ve bir kez
     # kod ile belgeler farklı değer söyler hâle geldi. Servisin GERÇEKTE
     # hangi eşikle karar verdiği dışarıdan görünsün.
+    # Kimliğin açık mı kapalı mı olduğu da aynı sebeple burada: anahtarı
+    # vermeyi unutmuş bir dağıtım, dışarıdan bakınca çalışan bir servisten
+    # ayırt edilemez. Anahtarın KENDİSİ değil, yalnız zorunlu olup olmadığı
+    # yazılır (bkz. anahtari_dogrula). /health bilerek anahtarsız kalır:
+    # canlılık yoklaması kimlik isteseydi, servis "ölü" görünürdü.
     return {"status": "ok",
             "etiket_modeli": PetEmbedder.MODEL_ID,
             "kimlik_modeli": SECILEN_KIMLIK,
             "vektor_boyutu": VEKTOR_BOYUTU,
             "model_version": MODEL_SURUMU,
-            "match_threshold": MATCH_THRESHOLD}
+            "match_threshold": MATCH_THRESHOLD,
+            "api_anahtari_zorunlu": bool(api_anahtari())}
 
 
 def _oznitelik_cikar(img_bytes: bytes, embedding: list[float] | None) -> dict:
@@ -99,7 +154,7 @@ async def _goruntuyu_isle(img_bytes: bytes) -> tuple[list[float], dict]:
     return embedding, vision
 
 
-@app.post("/analyze", response_model=AnalyzeResponse)
+@app.post("/analyze", response_model=AnalyzeResponse, dependencies=[Depends(anahtari_dogrula)])
 async def analyze(file: UploadFile = File(...)):
     """
     Fotoğrafı analiz et: embedding çıkar + label al.
@@ -128,7 +183,7 @@ async def analyze(file: UploadFile = File(...)):
     )
 
 
-@app.post("/analyze_url")
+@app.post("/analyze_url", dependencies=[Depends(anahtari_dogrula)])
 async def analyze_url(req: AnalyzeUrlRequest):
     """
     Fotoğrafları ADRESLERİNDEN indirip analiz et — üretim akışının yaptığı iş.
@@ -152,7 +207,7 @@ async def analyze_url(req: AnalyzeUrlRequest):
         raise HTTPException(500, {"code": "INTERNAL", "message": "Analiz sırasında hata"})
 
 
-@app.post("/compare")
+@app.post("/compare", dependencies=[Depends(anahtari_dogrula)])
 async def compare(
     file1: UploadFile = File(...),
     file2: UploadFile = File(...),
@@ -189,7 +244,7 @@ async def compare(
     }
 
 
-@app.post("/match")
+@app.post("/match", dependencies=[Depends(anahtari_dogrula)])
 async def match(req: MatchRequest):
     """
     Yeni ilan/external kayıt ile mevcut adayları karşılaştır, skorla sırala.

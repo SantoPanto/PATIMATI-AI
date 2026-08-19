@@ -584,3 +584,41 @@ def test_ikinci_sinyal_varsayilana_dusuyor(sinyal_duzeni_korunsun):
         isleyici(signal.SIGTERM, None)
     assert signal.getsignal(signal.SIGTERM) is signal.SIG_DFL, (
         "ikinci sinyal hâlâ işleyiciye düşüyor; kapanış ortasında iz dökme riski")
+
+# --------------------------------------------------------------------------
+# Eşik: `match` bayrağının anlamı zamanla değişiyor (B6)
+# --------------------------------------------------------------------------
+
+def test_sonuc_o_anki_esigi_tasir(sahte_analiz):
+    """`match: true` = "score >= eşik", ama eşik SABİT DEĞİL: 0.70 → 0.80 (PR #17).
+
+    Java kaydı "bu eşleşme üretilirken eşik neydi" bilgisini saklıyor
+    (`ad_match.threshold_at_time`, NOT NULL). Değer buradan gitmezse Java ya
+    kaydı yazamaz ya da ikinci bir kaynaktan tahmin eder; iki kaynak sessizce
+    kayar ve kayıt geçmişe dair yanlış konuşur.
+    """
+    sahte_analiz()
+    sonuc = istegi_isle(istek(candidates=[aday()]))
+    assert sonuc["match_threshold"] == pytest.approx(kuyruk.MATCH_THRESHOLD)
+
+
+def test_esik_sabit_yazilmamis_calisan_degeri_izler(sahte_analiz, monkeypatch):
+    """Sayı sabit yazılsaydı üstteki test YİNE GEÇERDİ — eşik bugün zaten o değer.
+
+    Bu yüzden çalışan eşiği değiştirip cevabın onu izlediğini ölçüyoruz.
+    Bekçi bu mutasyonla sınandı: `"match_threshold": 0.80` yazınca düşüyor.
+    """
+    monkeypatch.setattr(kuyruk, "MATCH_THRESHOLD", 0.42)
+    sahte_analiz()
+    sonuc = istegi_isle(istek(candidates=[aday()]))
+    assert sonuc["match_threshold"] == pytest.approx(0.42), (
+        "cevaptaki eşik çalışan değeri izlemiyor — sabit yazılmış olabilir")
+
+
+def test_esik_json_e_cevrilebilir_sayidir(sahte_analiz):
+    """Java bunu `DOUBLE PRECISION NOT NULL` sütuna yazıyor: sayı olmalı, None değil."""
+    sahte_analiz()
+    sonuc = istegi_isle(istek(candidates=[aday()]))
+    yeniden = json.loads(json.dumps(sonuc, ensure_ascii=False))
+    assert isinstance(yeniden["match_threshold"], float)
+    assert yeniden["match_threshold"] is not None
