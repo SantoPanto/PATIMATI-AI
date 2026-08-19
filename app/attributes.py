@@ -123,6 +123,18 @@ HARD_PROMPTS = {
             "a photo of a large sized pet",
             "a photo where the pet size cannot be determined"
         ]
+    },
+    "eye_color": {
+        "keys": ["brown", "blue", "green", "amber", "hazel", "heterochromia", "unknown"],
+        "prompts": [
+            "a photo of a pet with brown eyes",
+            "a photo of a pet with blue eyes",
+            "a photo of a pet with green eyes",
+            "a photo of a pet with amber or yellowish eyes",
+            "a photo of a pet with hazel eyes",
+            "a photo of a pet with odd eyes, heterochromia, one blue and one brown eye",
+            "a photo where the pet's eye color is not visible"
+        ]
     }
 }
 
