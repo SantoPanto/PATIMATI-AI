@@ -105,7 +105,7 @@ async def analyze(file: UploadFile = File(...)):
     Fotoğrafı analiz et: embedding çıkar + label al.
     Hem kayıp hem buldum ilanı oluşturulurken çağrılır.
     """
-    if not file.content_type.startswith("image/"):
+    if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(400, "Yalnızca görüntü dosyaları kabul edilir.")
 
     img_bytes = await file.read()
@@ -165,7 +165,7 @@ async def compare(
     """
     analyses = []
     for f in (file1, file2):
-        if not f.content_type.startswith("image/"):
+        if not f.content_type or not f.content_type.startswith("image/"):
             raise HTTPException(400, "Yalnızca görüntü dosyaları kabul edilir.")
         img_bytes = await f.read()
         if len(img_bytes) > 10 * 1024 * 1024:
@@ -209,7 +209,13 @@ async def match(req: MatchRequest):
     kullanılır — native davranış hiç değişmez.
     """
     try:
-        matches, atlanan = adaylari_eslestir(
+        # run_in_threadpool: adaylari_eslestir CPU'ya bağlı (yüzlerce adayla
+        # cosine similarity) senkron bir iştir -- /analyze ve /compare aynı
+        # sebeple havuza atıyor (bkz. _goruntuyu_isle), burası da tutarlı
+        # olmalı; aksi hâlde yoğun bir /match isteği olay döngüsünü bloklar,
+        # /health bile o sırada yanıtsız kalır.
+        matches, atlanan = await run_in_threadpool(
+            adaylari_eslestir,
             embeddings=req.embeddings, labels=req.labels, species=req.species,
             candidates=req.candidates, ad_id=req.ad_id,
             external_record_id=req.external_record_id,

@@ -23,6 +23,15 @@ DLX = "patimati.ai.dlx"
 ISTEK_KUYRUGU = "ai.analysis.request"
 SONUC_KUYRUGU = "ai.analysis.result"
 DLQ = "ai.analysis.request.dlq"
+# Sonuç kuyruğunun kendi ölü mektup kuyruğu: Java tarafında onResult bir
+# istisna fırlatırsa ya da mesaj hiç ayrıştırılamazsa DÜŞECEĞİ yer. İstek
+# tarafının DLQ'suyla BİLEREK BİRLEŞTİRİLMEDİ -- her kuyruğun kendi DLQ'su
+# var, aynı DLX'i (tek exchange) paylaşıyorlar. Bu taraf (Python) bu kuyruğa
+# hiç mesaj YAZMIYOR/OKUMUYOR -- yalnızca topolojiyi ilan ediyor, çünkü
+# `SONUC_KUYRUGU`'nu Java'nın x-dead-letter-exchange argümanıyla ilan
+# edeceğini bilmesi gerekiyor (aksi hâlde PRECONDITION_FAILED, bkz. bu
+# fonksiyonun docstring'i).
+SONUC_DLQ = "ai.analysis.result.dlq"
 ISTEK_ANAHTARI = "analysis.request"
 SONUC_ANAHTARI = "analysis.result"
 
@@ -74,5 +83,12 @@ def topolojiyi_kur(kanal) -> None:
                         arguments={"x-dead-letter-exchange": DLX})
     kanal.queue_bind(ISTEK_KUYRUGU, EXCHANGE, routing_key=ISTEK_ANAHTARI)
 
-    kanal.queue_declare(SONUC_KUYRUGU, durable=True)
+    # Sonuç kuyruğunun kendi DLQ'su -- aynı gerekçe, kuyruk adıyla değil
+    # `analysis.result` anahtarıyla bağlanıyor (RabbitMQ ölü mektuba
+    # düşürürken orijinal yönlendirme anahtarını korur).
+    kanal.queue_declare(SONUC_DLQ, durable=True)
+    kanal.queue_bind(SONUC_DLQ, DLX, routing_key=SONUC_ANAHTARI)
+
+    kanal.queue_declare(SONUC_KUYRUGU, durable=True,
+                        arguments={"x-dead-letter-exchange": DLX})
     kanal.queue_bind(SONUC_KUYRUGU, EXCHANGE, routing_key=SONUC_ANAHTARI)

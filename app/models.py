@@ -82,6 +82,26 @@ class MatchRequest(BaseModel):
     # değer olarak sabitlenmemiştir.
     match_threshold: float | None = None
 
+    @model_validator(mode="after")
+    def _en_fazla_bir_kimlik(self):
+        """MatchCandidate/KuyrukIstegi'ndeki _tam_olarak_bir_kimlik'in AYNISI
+        DEĞİL, kasıtlı olarak daha gevşek: burada İKİSİ DE boş kalabilir --
+        self-exclusion o zaman devre dışı kalır (bkz. matcher.py:
+        sorgu_kimligi == (None, None) ise "kendisi" eleme hiç çalışmaz).
+        Bu KASITLI ve mevcut testlerle zaten doğrulanmış bir davranış
+        (test_match_bos_aday_listesiyle_bos_sonuc_doner,
+        test_match_bozuk_sorgu_embeddingi_400_doner -- ikisi de ne ad_id ne
+        external_record_id göndermiyor). O yüzden "tam olarak biri" değil,
+        yalnızca "ikisi BİRDEN değil" zorunlu kılınır -- asıl rapor edilen
+        bug zaten bu: ikisi birden dolu geldiğinde matcher.py._aday_kimligi
+        ad_id'yi sessizce önceliklendiriyordu (bkz. matcher.py:281-287,
+        332-334), external_record_id sorgusu yanlış kimlikle
+        eşleştiriliyordu."""
+        if self.ad_id is not None and self.external_record_id is not None:
+            raise ValueError(
+                "ad_id ve external_record_id aynı anda dolu olamaz")
+        return self
+
 
 class KuyrukIstegi(BaseModel):
     """`ai.analysis.request` kuyruğundan gelen mesaj (sözleşme §3).

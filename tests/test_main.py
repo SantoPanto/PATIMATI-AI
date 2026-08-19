@@ -160,6 +160,32 @@ def test_match_kendisi_elenir():
     assert body["skipped_candidates"]["kendisi"] == 1
 
 
+def test_match_ad_id_ve_external_record_id_ikisi_birden_reddedilir():
+    """models.py: MatchRequest._en_fazla_bir_kimlik. Düzeltme öncesi ikisi de
+    dolu gelebiliyordu ve matcher.py._aday_kimligi ad_id'yi sessizce
+    önceliklendiriyordu (external_record_id sorgusu yanlış kimlikle
+    eşleştiriliyordu) -- artık 422 ile açıkça reddedilir."""
+    r = client.post("/match", json={
+        "embeddings": [vektor(0)], "labels": ["cat"], "species": "cat",
+        "ad_id": 5, "external_record_id": 7,
+        "candidates": [],
+    })
+    assert r.status_code == 422
+
+
+def test_match_ikisi_de_bos_hala_gecerli():
+    """MatchCandidate/KuyrukIstegi'nin aksine MatchRequest'te "hiçbiri"
+    hâlâ geçerli bir durum -- self-exclusion o zaman devre dışı kalır (bkz.
+    models.py._en_fazla_bir_kimlik docstring'i). Bu davranışı bilerek
+    KORUYORUZ; test_match_bos_aday_listesiyle_bos_sonuc_doner ile aynı
+    girdi şeklini kapsıyor, burada ayrıca 'kırılmadı' diye adı geçiyor."""
+    r = client.post("/match", json={
+        "embeddings": [vektor(0)], "labels": ["cat"], "species": "cat",
+        "candidates": [],
+    })
+    assert r.status_code == 200
+
+
 def test_match_bozuk_sorgu_embeddingi_400_doner():
     """Sorgunun kendi embedding'i bozuksa 'aday elendi' gibi yutulmamalı, açık
     400 dönmeli (bkz. app/matcher.py: adaylari_eslestir)."""

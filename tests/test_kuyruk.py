@@ -16,7 +16,7 @@ import pytest
 
 from app import kuyruk
 from app.kuyruk import (DLQ, DLX, EXCHANGE, ISTEK_ANAHTARI, ISTEK_KUYRUGU,
-                        SEMA_SURUMU, SONUC_ANAHTARI, SONUC_KUYRUGU,
+                        SEMA_SURUMU, SONUC_ANAHTARI, SONUC_DLQ, SONUC_KUYRUGU,
                         istegi_isle, topolojiyi_kur)
 from app.surum import MODEL_SURUMU, VEKTOR_BOYUTU
 
@@ -411,7 +411,7 @@ def test_topoloji_sozlesmedeki_nesneleri_ilan_eder():
     exchangeler = {o[1] for o in kanal.olaylar if o[0] == "exchange"}
     kuyruklar = {o[1] for o in kanal.olaylar if o[0] == "kuyruk"}
     assert exchangeler == {EXCHANGE, DLX}
-    assert kuyruklar == {ISTEK_KUYRUGU, SONUC_KUYRUGU, DLQ}
+    assert kuyruklar == {ISTEK_KUYRUGU, SONUC_KUYRUGU, DLQ, SONUC_DLQ}
 
 
 def test_dlq_orijinal_yonlendirme_anahtariyla_baglanir():
@@ -434,6 +434,29 @@ def test_istek_kuyrugu_dlx_e_baglidir():
 
     ilan = next(o for o in kanal.olaylar
                 if o[0] == "kuyruk" and o[1] == ISTEK_KUYRUGU)
+    assert ilan[2]["arguments"]["x-dead-letter-exchange"] == DLX
+    assert ilan[2]["durable"] is True
+
+
+def test_sonuc_dlq_orijinal_yonlendirme_anahtariyla_baglanir():
+    """İstek tarafındaki aynı tuzak, sonuç tarafı için de geçerli: SONUC_DLQ
+    kuyruk adıyla değil `analysis.result` anahtarıyla bağlanmalı."""
+    kanal = SahteKanal()
+    topolojiyi_kur(kanal)
+
+    dlq_baglari = [o for o in kanal.olaylar if o[0] == "bag" and o[1] == SONUC_DLQ]
+    assert dlq_baglari == [("bag", SONUC_DLQ, DLX, SONUC_ANAHTARI)]
+
+
+def test_sonuc_kuyrugu_dlx_e_baglidir():
+    """Java'daki onResult bir istisna fırlatırsa (ya da mesaj hiç
+    ayrıştırılamazsa) mesaj SONUC_DLQ'ya düşsün diye -- x-dead-letter-exchange
+    yoksa aynı kuyruğa sonsuz döngüyle geri döner (zehirli mesaj)."""
+    kanal = SahteKanal()
+    topolojiyi_kur(kanal)
+
+    ilan = next(o for o in kanal.olaylar
+                if o[0] == "kuyruk" and o[1] == SONUC_KUYRUGU)
     assert ilan[2]["arguments"]["x-dead-letter-exchange"] == DLX
     assert ilan[2]["durable"] is True
 

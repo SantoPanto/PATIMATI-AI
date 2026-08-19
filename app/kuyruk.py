@@ -37,7 +37,7 @@ from pydantic import ValidationError
 # çalışmaya devam etsin — çağıranın hangi dosyada durduğunu bilmesi gerekmez.
 from .topoloji import (AMQP_URL, DLQ, DLX, EXCHANGE, ISTEK_ANAHTARI,  # noqa: F401
                        ISTEK_KUYRUGU, KALP_ATISI, PREFETCH, SEMA_SURUMU,
-                       SONUC_ANAHTARI, SONUC_KUYRUGU, topolojiyi_kur)
+                       SONUC_ANAHTARI, SONUC_DLQ, SONUC_KUYRUGU, topolojiyi_kur)
 
 # DİKKAT: `.topoloji` yukarıda load_dotenv() çağırıyor ve bu satırın ÜSTÜNDE
 # durması şart — `.surum` modülü ortam değişkenlerini içe aktarma anında
@@ -263,8 +263,34 @@ def _mesaj_geldi(kanal, method, ozellikler, govde: bytes) -> None:
     # yazılmamış olur — ilan sessizce PENDING'de kalır ve kimse fark etmez.
     # Bu sırayla, çökme hâlinde mesaj yeniden teslim edilir; yeniden işlemek
     # zararsızdır çünkü AI tarafı saftır (§8).
-    sonucu_yayinla(kanal, sonuc)
-    kanal.basic_ack(method.delivery_tag)
+    try:
+        sonucu_yayinla(kanal, sonuc)
+        kanal.basic_ack(method.delivery_tag)
+    except pika.exceptions.AMQPError:
+        # Bağlantı/kanal düzeyinde bir sorun -- kanal muhtemelen zaten
+        # kullanılamaz durumda, burada nack DENEMİYORUZ (kendisi de aynı
+        # sebeple patlar). dinle()'nin dış AMQPError yakalayıcısı zaten
+        # bunun için var: yeniden bağlanır. RabbitMQ, bağlantısı kopan bir
+        # tüketicinin onaylanmamış mesajlarını KENDİLİĞİNDEN yeniden
+        # kuyruğa koyar -- burada elle bir şey yapmamıza gerek yok.
+        raise
+    except Exception as e:
+        # AMQPError DIŞINDA bir istisna (ör. `sonuc` içinde JSON'a
+        # çevrilemeyen bir değer -- TypeError) daha önce hiçbir yerde
+        # yakalanmıyordu: dinle()'nin dış except'i yalnızca
+        # pika.exceptions.AMQPError'ı yakalıyor, böyle bir istisna süreci
+        # doğrudan çökertiyordu. Mesaj hiç ack'lenmediği için yeniden
+        # teslim edilip AYNI istisnayı tekrar fırlatır, süreç sonsuz
+        # döngüde tekrar tekrar çökerdi (zehirli mesaj). §8'deki
+        # "ayrıştırılamayan mesaj" deseniyle TUTARLI: nack(requeue=False)
+        # ile DLQ'ya gönderiyoruz, süreç ayakta kalıyor.
+        logger.exception(
+            "Sonuç yayınlanamadı/onaylanamadı, mesaj DLQ'ya gönderildi: "
+            "ad_id=%s external_record_id=%s",
+            sonuc.get("ad_id"), sonuc.get("external_record_id"),
+        )
+        kanal.basic_nack(method.delivery_tag, requeue=False)
+        return
 
     logger.info("ad_id=%s durum=%s eşleşme=%d süre=%.1fsn",
                 sonuc.get("ad_id"), sonuc.get("status"),
