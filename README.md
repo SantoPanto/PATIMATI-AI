@@ -142,9 +142,11 @@ Her süreç modeli kendi belleğine yükler ve süreçler arası **paylaşım yo
 buna rağmen sayı naif bir "ikiye katlama"dan düşük çıkıyor — muhtemelen
 ağırlıklar safetensors üzerinden eşlemeli okunduğu için salt-okunur sayfalar
 çekirdek önbelleğinde ortaklaşıyor. **Bu mekanizma ölçülmedi**, sayı ölçüldü.
-`siglip2-animal` ile süreç başına İKİ model yükleniyor, o hâli **hiç
-ölçmedik** — dar bellekli bir ortama koymadan önce yukarıdaki adımın çıktısına
-bakın. Gerekirse `hepsi` yerine aynı imajdan iki servis açın:
+🔴 **Bu sayı artık VARSAYILAN yapılandırmayı ölçmüyor.** 19.08.2026'dan beri
+varsayılan `siglip2-animal` ve onunla süreç başına **İKİ** model yükleniyor;
+o hâli **hiç ölçmedik** (CI `clip` ile koştuğu için oradaki `docker stats` de
+ölçmeyecek). Dar bellekli bir ortama koymadan önce **kendi ortamınızda ölçün**.
+Gerekirse `hepsi` yerine aynı imajdan iki servis açın:
 
 ```bash
 docker run -e SERVIS_ROLU=http   -p 8000:8000 patimati-ai
@@ -161,14 +163,18 @@ hepsi `-e` / `--env-file` ile geçilir):
 - `MATCH_THRESHOLD` — bildirim eşiği. Çalışan değeri `/health` döndürür.
 - `AI_API_KEY` — uçların paylaşılan anahtarı (sözleşme §10). **Zorunludur.**
   `/analyze`, `/analyze_url`, `/compare`, `/match` `X-Api-Key` ister; `/health`
-  açık kalır. **Verilmezse korumalı uçların hepsi 401 döner** — servis kalkar
-  ama iş görmez. Sessiz değil: açılışta hata kaydı düşer, `/health`
-  `api_anahtari_yapilandirildi` alanıyla gerçeği söyler. Aynı değer backend'in
-  `ai.service.api-key` ayarına da verilmeli.
-- `KIMLIK_MODEL` — `clip` dışında bir değer kullanılacaksa **hem build-arg hem
-  ortam değişkeni** olarak verilmeli (yukarıdaki Dockerfile notu). `hepsi`
-  rolünde iki süreç ağırlığı aynı anda indirmeye çalışır: veri kaybı olmaz
-  (HuggingFace dosya kilidi sıraya sokar) ama soğuk açılış iki katına çıkar.
+  açık kalır. **Verilmezse uçlar kimliksizdir** — bilinçli ama sessiz değil:
+  açılışta uyarı yazılır, `/health` `api_anahtari_zorunlu` alanıyla gerçeği
+  söyler.
+- `KIMLIK_MODEL` — eşleştirme vektörünü üreten model. **Varsayılan
+  `siglip2-animal`** (ölçümde en düşük hata, EER 0.052). Varsayılandan
+  SAPILACAKSA değer **hem build-arg hem ortam değişkeni** olarak verilmeli
+  (yukarıdaki Dockerfile notu); yalnız birini vermek imajda olmayan bir ağırlığı
+  ilk istekte indirtir. `hepsi` rolünde iki süreç ağırlığı aynı anda indirmeye
+  çalışır: veri kaybı olmaz (HuggingFace dosya kilidi sıraya sokar) ama soğuk
+  açılış iki katına çıkar.
+  **Modeli değiştirmek `model_version`'ı da değiştirir** ⇒ eski vektörler
+  kıyaslanamaz, o ilanlar yeniden analiz ister (`skipped_candidates`).
 
 `SERVIS_ROLU` **`.env`'den okunmaz** — değişken Python başlamadan önce, giriş
 betiği tarafından okunuyor; `load_dotenv()` ona erişemez. `docker run -e` ile
