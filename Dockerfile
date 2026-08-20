@@ -2,15 +2,20 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Kimlik modeli seçimi (bkz. app/surum.py). Yalnızca runtime'da KIMLIK_MODEL
-# ortam değişkenini değiştirmek YETMEZ: "clip" dışındaki seçenekler ağırlığı
-# HuggingFace'ten indirir ve bu, ilk istekte ~1,4 GB'a kadar ağ bekleyişi +
-# dışa bağımlılık demektir — imajın "çalışma zamanında ağ bağımlılığı kalmasın"
-# amacını bozar. Farklı bir model kullanacaksanız aynı değeri hem build-arg hem
-# runtime env olarak verin:
-#   docker build --build-arg KIMLIK_MODEL=siglip2-animal -t patimati-ai .
-#   docker run -e KIMLIK_MODEL=siglip2-animal patimati-ai
-ARG KIMLIK_MODEL=clip
+# Kimlik modeli seçimi (bkz. app/surum.py). Varsayılan "siglip2-animal": ağırlığı
+# ~1,4 GB ve depoda değil, o yüzden AŞAĞIDA BUILD SIRASINDA indiriliyor — imajın
+# "çalışma zamanında ağ bağımlılığı kalmasın" amacı ancak böyle korunur. Bedeli
+# build'in yavaşlaması ve imajın büyümesidir; bilinçli takas.
+#
+# Modeli değiştirecekseniz aynı değeri HEM build-arg HEM runtime env olarak verin;
+# yalnız runtime'da vermek yetmez, o ağırlık imajda bulunmaz ve ilk istekte
+# indirilmeye çalışılır:
+#   docker build --build-arg KIMLIK_MODEL=google-siglip2 -t patimati-ai .
+#   docker run -e KIMLIK_MODEL=google-siglip2 patimati-ai
+#
+# CI bilerek "clip" ile build ediyor (.github/workflows/ci.yml) — 1,4 GB'lık
+# indirme her koşumu yavaşlatır ve kırılganlaştırır.
+ARG KIMLIK_MODEL=siglip2-animal
 
 # curl: container healthcheck için
 RUN apt-get update && apt-get install -y --no-install-recommends curl && \

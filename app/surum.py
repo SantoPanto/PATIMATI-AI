@@ -31,22 +31,32 @@ import os
 
 # Kimlik modeli seçenekleri. Anahtar = KIMLIK_MODEL ortam değişkenine yazılan ad.
 KIMLIK_MODELLERI = {
-    # Varsayılan. Ayrı bir model yüklenmez, etiketçi CLIP kimlik için de kullanılır.
-    # Ek bellek maliyeti sıfır; ölçümde en zayıf seçenek ama her yerde çalışır.
+    # Ayrı bir model yüklenmez, etiketçi CLIP kimlik için de kullanılır: ek bellek
+    # maliyeti sıfır ve indirilecek ağırlık yok. Ölçümde EN ZAYIF seçenek
+    # (EER 0.113), o yüzden ÜRETİMİN varsayılanı değil — ama her makinede ağ
+    # olmadan çalıştığı için TESTLERİN ve CI'ın seçimi budur
+    # (tests/conftest.py sabitliyor, .github/workflows/ci.yml açıkça veriyor).
     "clip": {
         "kimlik": "openai/clip-vit-base-patch32",
         "islemci": None,
         "surum": "clip-vit-base-patch32/v1",
         "boyut": 512,
     },
+    # >>> VARSAYILAN (2026-08-19) <<<
     # Model yarışının kazananı (docs/olcum-raporu.md §7). Üç veri kümesinde de
     # en düşük hata oranı: EER 0.052, CLIP'in 0.113'üne karşı.
     #
-    # İKİ UYARI:
+    # ÜÇ UYARI — varsayılan olduğu için üçü de artık her kurulumu ilgilendiriyor:
     # 1) Ağırlıklar ~1.4 GB ve depoda değil. KIMLIK_MODEL_YOLU ile yerel bir
-    #    klasör gösterilebilir; yoksa HuggingFace'ten iner.
-    # 2) LİSANSI BELİRTİLMEMİŞ. Staj kapsamında dağıtım olmadığı için
-    #    kullanılıyor; ticarileşme hâlinde yeniden değerlendirilmeli.
+    #    klasör gösterilebilir; yoksa HuggingFace'ten iner. Dockerfile bunu
+    #    BUILD sırasında indirir ki çalışma zamanında ağ bağımlılığı kalmasın.
+    # 2) LİSANSI BELİRTİLMEMİŞ ve site 19.08.2026'dan beri halka açık
+    #    (https://patimati.me). Varsayılan yapılırken bu BİLEREK kabul edildi:
+    #    ölçülen doğruluk farkı seçildi, lisans riski açık borç olarak duruyor.
+    #    Ticari kullanım gündeme gelirse "google-siglip2" (Apache 2.0) hazır
+    #    yedek — tek yapılacak KIMLIK_MODEL değerini değiştirmek + yeniden analiz.
+    # 3) CI bu modelle KOŞMUYOR (ağırlık 1,4 GB). CI'ın yeşili kodun
+    #    sağlamlığını gösterir, bu modelin doğruluğunu değil.
     "siglip2-animal": {
         "kimlik": os.getenv("KIMLIK_MODEL_YOLU",
                             "AvitoTech/SigLIP2-Base-for-animal-identification"),
@@ -66,7 +76,10 @@ KIMLIK_MODELLERI = {
     },
 }
 
-SECILEN_KIMLIK = os.getenv("KIMLIK_MODEL", "clip")
+# Varsayılan buradan okunur. Değiştirirken .env.example ve Dockerfile'daki ARG
+# da değişmeli — tests/test_varsayilan_model_tutarliligi.py üçünün kaymasını
+# engelliyor (eşik için aynı işi test_esik_tutarliligi.py yapıyor).
+SECILEN_KIMLIK = os.getenv("KIMLIK_MODEL", "siglip2-animal")
 if SECILEN_KIMLIK not in KIMLIK_MODELLERI:
     raise ValueError(
         f"KIMLIK_MODEL='{SECILEN_KIMLIK}' tanınmıyor. "
