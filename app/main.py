@@ -27,10 +27,10 @@ ANAHTAR_BASLIGI = "X-Api-Key"
 
 
 def api_anahtari() -> str:
-    """Yapılandırılmış paylaşılan sır; boşsa kimlik doğrulaması KAPALIDIR.
+    """Yapılandırılmış paylaşılan sır; boşsa korumalı uçlar HİÇBİR isteği kabul etmez.
 
     Her çağrıda okunur, modül yüklenirken bir kez değil: değeri sabitlemek
-    testlerin ortamı değiştirmesini imkânsız kılar ve "açık mı kapalı mı"
+    testlerin ortamı değiştirmesini imkânsız kılar ve "anahtar verildi mi"
     sorusunun cevabı yalnızca yeniden başlatmayla değişebilirdi.
     """
     return os.getenv("AI_API_KEY", "").strip()
@@ -39,24 +39,35 @@ def api_anahtari() -> str:
 async def anahtari_dogrula(
     x_api_key: str | None = Header(default=None, alias=ANAHTAR_BASLIGI),
 ) -> None:
-    """Uçları paylaşılan bir sırla korur (A1).
+    """Uçları paylaşılan bir sırla korur (A1). VARSAYILAN DAVRANIŞ: REDDET.
 
-    ANAHTAR YAPILANDIRILMAMIŞSA hiçbir şey doğrulanmaz. Böyle olmasının
-    sebebi dağıtım sırası: bu servis bugün tarayıcıdan da çağrılıyor
-    (`AddListingPage`), ve anahtarı bir anda zorunlu kılmak ilan oluşturma
-    ekranını kırardı. Zorunluluk, çağıranların hepsi backend üzerinden
-    geçtikten sonra `AI_API_KEY` verilerek açılır.
+    ANAHTAR YAPILANDIRILMAMIŞSA hiçbir istek geçmez — 401. Eskiden tersiydi:
+    anahtar yoksa kapı tamamen açılıyordu. Gerekçesi dağıtım sırasıydı, bu
+    servis tarayıcıdan da çağrılıyordu (`AddListingPage`) ve anahtarı bir anda
+    zorunlu kılmak ilan oluşturma ekranını kırardı. **O engel kalktı:** ön yüz
+    artık AI'ı doğrudan çağırmıyor (`/api/ai/analyze` üzerinden backend'e
+    gidiyor) ve backend `X-Api-Key` başlığını gönderiyor
+    (`AiMatchService`, `ai.service.api-key`).
 
-    ⚠ Ama bu durum SESSİZ değildir: açılışta uyarı yazılır ve `/health`
-    gerçeği söyler. Sessizce açık kalan bir kapı, hiç olmayan kapıdan
-    tehlikelidir — kimse eksikliğini fark etmez.
+    Bir yapılandırma eksiği yüzünden kapının AÇILMASI yanlış varsayılandır:
+    unutulan bir ortam değişkeni sessizce "herkese açık AI servisi" üretir ve
+    canlıda bu, kaynak sömürüsü demektir. Unutulan değişkenin cezası
+    "çalışmıyor" olmalı, "korumasız çalışıyor" değil.
+
+    ⚠ Anahtarsız kurulum sessiz DEĞİLDİR: açılışta hata seviyesinde kayıt
+    düşer ve `/health` `api_anahtari_yapilandirildi: false` der. `/health`
+    bilerek anahtarsız kalır, yoksa canlılık yoklaması servisi ölü gösterirdi.
 
     Karşılaştırma sabit zamanlıdır: sıradan `==` ilk farklı bayta kadar geçen
     süreyi sızdırır ve anahtar bayt bayt tahmin edilebilir hâle gelir.
     """
     beklenen = api_anahtari()
     if not beklenen:
-        return
+        # Anahtar yokken "geçerli anahtar" diye bir şey yoktur; karşılaştırmaya
+        # girmeden reddedilir. Boş sırla compare_digest yapmak, boş başlık
+        # gönderen herkesi içeri alırdı.
+        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED",
+                                                     "message": "Gecersiz veya eksik API anahtari"})
 
     gelen = x_api_key or ""
     if not secrets.compare_digest(gelen.encode("utf-8"), beklenen.encode("utf-8")):
@@ -70,10 +81,13 @@ async def anahtari_dogrula(
 async def lifespan(app: FastAPI):
     logger.info("AI servisi başlatılıyor...")
     if not api_anahtari():
-        logger.warning(
+        # Uyarı değil HATA: bu hâlde servis ayakta ama İŞE YARAMAZ durumdadır,
+        # /analyze de /match de 401 döner. Kayıt seviyesi bunu söylemeli ki
+        # "kalktı demek ki çalışıyor" sanılmasın.
+        logger.error(
             "AI_API_KEY tanımlı DEĞİL: /analyze, /analyze_url, /compare ve /match "
-            "uçları KİMLİKSİZ çalışıyor. Çağıranlar backend üzerinden geçtikten "
-            "sonra bu değişken verilmeli.")
+            "uçlarının HEPSİ 401 dönecek. Aynı değer backend'in "
+            "ai.service.api-key ayarına da verilmeli, yoksa eşleştirme çalışmaz.")
     yield
     logger.info("AI servisi kapatılıyor.")
 
@@ -97,18 +111,22 @@ async def health():
     # Eşik de aynı sebeple burada: ortam değişkeniyle eziliyor, ve bir kez
     # kod ile belgeler farklı değer söyler hâle geldi. Servisin GERÇEKTE
     # hangi eşikle karar verdiği dışarıdan görünsün.
-    # Kimliğin açık mı kapalı mı olduğu da aynı sebeple burada: anahtarı
-    # vermeyi unutmuş bir dağıtım, dışarıdan bakınca çalışan bir servisten
-    # ayırt edilemez. Anahtarın KENDİSİ değil, yalnız zorunlu olup olmadığı
-    # yazılır (bkz. anahtari_dogrula). /health bilerek anahtarsız kalır:
-    # canlılık yoklaması kimlik isteseydi, servis "ölü" görünürdü.
+    # Anahtarın YAPILANDIRILIP yapılandırılmadığı da aynı sebeple burada:
+    # anahtarı vermeyi unutmuş bir dağıtım, dışarıdan bakınca çalışan bir
+    # servisten ayırt edilemez — /health 200 döner ama korumalı uçların hepsi
+    # 401'dir. Anahtarın KENDİSİ değil, yalnız verilip verilmediği yazılır.
+    # (Alan eskiden `api_anahtari_zorunlu` idi; kilit artık her hâlükârda
+    # zorunlu olduğu için o soru tek cevaplı hâle geldi ve bilgi taşımıyordu.
+    # Dağıtımın cevaplanması gereken sorusu artık "anahtar verildi mi".)
+    # /health bilerek anahtarsız kalır: canlılık yoklaması kimlik isteseydi,
+    # servis "ölü" görünürdü.
     return {"status": "ok",
             "etiket_modeli": PetEmbedder.MODEL_ID,
             "kimlik_modeli": SECILEN_KIMLIK,
             "vektor_boyutu": VEKTOR_BOYUTU,
             "model_version": MODEL_SURUMU,
             "match_threshold": MATCH_THRESHOLD,
-            "api_anahtari_zorunlu": bool(api_anahtari())}
+            "api_anahtari_yapilandirildi": bool(api_anahtari())}
 
 
 def _oznitelik_cikar(img_bytes: bytes, embedding: list[float] | None) -> dict:

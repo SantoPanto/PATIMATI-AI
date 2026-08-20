@@ -24,7 +24,32 @@ from app import main
 from app.hatalar import FotografIndirilemedi
 from app.surum import MODEL_SURUMU, VEKTOR_BOYUTU
 
-client = TestClient(main.app)
+#: Testlerin kullandığı paylaşılan sır. A1 bölümündeki kilit testleri de bunu
+#: kullanır; tek yerde durması "hangi anahtarla koştuk" sorusunu tek cevaplı yapar.
+ANAHTAR = "cok-gizli-anahtar"
+
+#: VARSAYILAN İSTEMCİ KİMLİKLİDİR. Kilit artık anahtar verilmediğinde de
+#: reddediyor (bkz. `anahtari_dogrula`), yani başlıksız bir istemciyle bu
+#: dosyadaki HTTP sözleşmesi testlerinin hepsi 401 alırdı ve ölçtükleri şeyi
+#: (cevap şekli, hata kodları) hiç ölçemezlerdi.
+client = TestClient(main.app, headers={"X-Api-Key": ANAHTAR})
+
+#: Kilidin KENDİSİNİ ölçen testler için. Varsayılan istemci başlığı otomatik
+#: eklediği için "anahtarsız istek" onunla kurulamaz.
+anahtarsiz_client = TestClient(main.app)
+
+
+@pytest.fixture(autouse=True)
+def _anahtar_yapilandirildi(monkeypatch):
+    """Her teste anahtarı yapılandırılmış bir servis verir.
+
+    Ortam değişkeni her istekte okunuyor (`api_anahtari`), dolayısıyla bunu
+    fikstürde sabitlemek şart: geliştiricinin `.env` dosyası `load_dotenv`
+    ile yüklenirse test hangi anahtarla koştuğunu bilemezdi.
+
+    Kilidi ölçen testler bunu `monkeypatch` ile kendileri geri alıyor.
+    """
+    monkeypatch.setenv("AI_API_KEY", ANAHTAR)
 
 
 def vektor(seed=0):
@@ -244,35 +269,35 @@ def test_openapi_semasi_kati_json_olarak_uretilebilir():
 # A1 — uçların kimliği (paylaşılan anahtar)
 # --------------------------------------------------------------------------
 
-ANAHTAR = "cok-gizli-anahtar"
-
 #: Kimlik isteyen uçlar. `/health` bilerek dışarıda: canlılık yoklaması
 #: kimlik isteseydi, doğru çalışan servis "ölü" görünürdü.
+#: (`ANAHTAR` sabiti dosyanın başında — istemciler de onu kullanıyor.)
 KORUNAN_UCLAR = ["/analyze", "/analyze_url", "/compare", "/match"]
 
 
 @pytest.mark.parametrize("yol", KORUNAN_UCLAR)
-def test_anahtar_yapilandirilmamissa_uc_401_vermez(monkeypatch, yol):
-    """Anahtar verilmediğinde BUGÜNKÜ davranış aynen sürmeli.
+def test_anahtar_yapilandirilmamissa_uc_401_verir(monkeypatch, yol):
+    """Varsayılan REDDET: yapılandırma eksikse kapı KAPANIR, açılmaz.
 
-    A1 üç depoya yayılıyor ve bu servis şu an tarayıcıdan da çağrılıyor.
-    Anahtarı bir anda zorunlu kılmak ilan oluşturma ekranını kırardı; bu test
-    o kırılmanın sessizce geri gelmesini engelliyor.
+    Bu testin eskisi tam tersini söylüyordu ("401 vermemeli") ve haklıydı:
+    servis o zaman tarayıcıdan da çağrılıyordu, anahtarı zorunlu kılmak ilan
+    oluşturma ekranını kırardı. O engel kalktı — ön yüz AI'ı doğrudan
+    çağırmıyor, backend `X-Api-Key` gönderiyor. Artık korunması gereken şey
+    ters yön: unutulmuş bir ortam değişkeni yüzünden servisin herkese açık
+    hâle gelmesi.
     """
     monkeypatch.delenv("AI_API_KEY", raising=False)
 
-    r = client.post(yol)
+    r = anahtarsiz_client.post(yol)
 
-    assert r.status_code != 401, (
-        f"{yol} anahtar YAPILANDIRILMADIĞI hâlde 401 verdi — çağıranlar "
-        f"backend'e geçmeden kilit kapandı, /add-listing kırılır.")
+    assert r.status_code == 401, (
+        f"{yol} anahtar YAPILANDIRILMADIĞI hâlde {r.status_code} verdi — "
+        f"eksik yapılandırma kapıyı AÇIYOR. Canlıda bu, kimliksiz AI demek.")
 
 
 @pytest.mark.parametrize("yol", KORUNAN_UCLAR)
-def test_anahtar_varken_anahtarsiz_istek_reddedilir(monkeypatch, yol):
-    monkeypatch.setenv("AI_API_KEY", ANAHTAR)
-
-    r = client.post(yol)
+def test_anahtar_varken_anahtarsiz_istek_reddedilir(yol):
+    r = anahtarsiz_client.post(yol)
 
     assert r.status_code == 401, (
         f"{yol} anahtar zorunluyken anahtarsız isteği kabul etti "
@@ -280,25 +305,23 @@ def test_anahtar_varken_anahtarsiz_istek_reddedilir(monkeypatch, yol):
 
 
 @pytest.mark.parametrize("yol", KORUNAN_UCLAR)
-def test_yanlis_anahtar_reddedilir(monkeypatch, yol):
+def test_yanlis_anahtar_reddedilir(yol):
     """Yalnız son harfin BÜYÜKLÜĞÜ farklı: ön ek ya da harf duyarsız eşleşme yok."""
-    monkeypatch.setenv("AI_API_KEY", ANAHTAR)
-
-    r = client.post(yol, headers={"X-Api-Key": "cok-gizli-anahtaR"})
+    r = anahtarsiz_client.post(yol, headers={"X-Api-Key": "cok-gizli-anahtaR"})
 
     assert r.status_code == 401, f"{yol} yanlış anahtarı kabul etti."
 
 
-def test_dogru_anahtar_gecer(monkeypatch, sahte_model):
+def test_dogru_anahtar_gecer(sahte_model):
     """Ön koşul: kilit yalnızca reddetmiyor, DOĞRU anahtarla geçiriyor da.
 
     Bu olmadan yukarıdaki üç test "her şeyi reddet" diyen bozuk bir kilitle de
-    yeşil yanardı.
+    yeşil yanardı — ki kilit artık gerçekten "varsayılan reddet" olduğu için
+    bu ön koşul eskisinden daha kritik.
     """
-    monkeypatch.setenv("AI_API_KEY", ANAHTAR)
     sahte_model()
 
-    r = client.post("/analyze",
+    r = anahtarsiz_client.post("/analyze",
                     headers={"X-Api-Key": ANAHTAR},
                     files={"file": ("kedi.jpg", _resim_baytlari(), "image/jpeg")})
 
@@ -306,22 +329,25 @@ def test_dogru_anahtar_gecer(monkeypatch, sahte_model):
     assert len(r.json()["embedding"]) == VEKTOR_BOYUTU
 
 
-def test_health_anahtar_zorunluyken_bile_acik_kalir(monkeypatch):
-    monkeypatch.setenv("AI_API_KEY", ANAHTAR)
-
-    r = client.get("/health")
+def test_health_anahtarsiz_da_acik_kalir():
+    r = anahtarsiz_client.get("/health")
 
     assert r.status_code == 200, (
         "/health kimlik istemeye başladı — canlılık yoklaması artık çalışan "
         "servisi ölü gösterir.")
-    assert r.json()["api_anahtari_zorunlu"] is True
+    assert r.json()["api_anahtari_yapilandirildi"] is True
 
 
-def test_health_kimlik_kapaliyken_gercegi_soyler(monkeypatch):
-    """Sessizce açık kalan kapı, hiç olmayan kapıdan tehlikelidir."""
+def test_health_anahtar_verilmediyse_gercegi_soyler(monkeypatch):
+    """Anahtarsız servis AYAKTA ama İŞE YARAMAZ; /health bunu söylemeli.
+
+    Aksi hâlde 200 dönen bir sağlık yoklaması, korumalı uçların hepsi 401
+    verirken "her şey yolunda" der ve yanlış yapılandırılmış dağıtım
+    çalışan bir dağıtımdan ayırt edilemez.
+    """
     monkeypatch.delenv("AI_API_KEY", raising=False)
 
-    assert client.get("/health").json()["api_anahtari_zorunlu"] is False
+    assert anahtarsiz_client.get("/health").json()["api_anahtari_yapilandirildi"] is False
 
 
 def test_butun_POST_uclari_korunuyor():
