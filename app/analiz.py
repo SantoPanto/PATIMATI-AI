@@ -81,10 +81,28 @@ def _birincil_sec(oznitelikler: list[dict]) -> dict:
     alanı dönüyor. En NET fotoğrafı seçiyoruz: hayvan görünen fotoğraflar
     arasından tür güveni en yüksek olanı. Uzaktan çekilmiş bulanık kareye
     bakıp "unknown" demek yerine, kullanıcının koyduğu net kareyi kullanır.
+
+    SIRALAMA ÖLÇÜTÜ İKİ BASAMAKLI (20.08.2026'da düzeltildi): önce "türü
+    atanabildi mi", sonra tür güveni. Tek başına `species_confidence`
+    yanlış ölçüttü — o sayı "fotoğrafta hayvan var mı" sorusunu HİÇ ölçmez,
+    yalnız "hayvansa kedi mi köpek mi" sorusunu ölçer ve iki seçenek
+    üzerinden hesaplandığı için hayvansız bir karede bile %83'e çıkabiliyor.
+
+    Ölçüldü: gerçek kedi karesi (güven 0.8177) + hayvansız kare (güven
+    0.8293) aynı ilana konduğunda BİRİNCİL hayvansız kare seçiliyordu ⇒
+    ilanın türü `cat` yerine `unknown` oluyor, etiketleri/deseni de o
+    kareden geliyordu. `is_pet` filtresi bunu yakalayamıyor çünkü hayvan
+    kapısı o karede zaten yanlış pozitif vermişti (26 hayvansız fotoğrafta
+    7 kez).
+
+    Türü atanmış bir fotoğraf, tanım gereği hayvan kanıtı eşiği geçmiş
+    fotoğraftır (bkz. attributes.py SPECIES_GATE_MIN) — yani bu basamak
+    yeni bir sinyal uydurmuyor, var olan kararı yeniden kullanıyor.
     """
     hayvanlilar = [o for o in oznitelikler if o["is_pet"]]
     aday = hayvanlilar or oznitelikler
-    return max(aday, key=lambda o: o["species_confidence"])
+    return max(aday, key=lambda o: (o["species"] != "unknown",
+                                    o["species_confidence"]))
 
 
 def urlleri_analiz_et(photo_urls: list[str]) -> dict:

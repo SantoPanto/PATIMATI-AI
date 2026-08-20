@@ -184,6 +184,30 @@ class AttributeAnalyzer:
     # gerçek yakalama oranı henüz ölçülmedi. Bu yüzden temkinli (düşük) seçildi:
     # şüpheli bir fotoğrafı geçirmek, gerçek bir ilanı reddetmekten iyidir.
     PET_GATE_MIN = float(os.getenv("PET_GATE_MIN", "0.10"))
+
+    # TÜR ATAMA kapısı — `PET_GATE_MIN`'den AYRI ve çok daha yüksek.
+    #
+    # Neden iki ayrı eşik: iki kararın bedeli aynı değil.
+    #   is_pet    yanlış olursa kimse elenmiyor (sözleşme §4: eleme ölçütü
+    #             DEĞİL), o yüzden bilerek temkinli/düşük tutuluyor.
+    #   species   yanlış olursa GERÇEKTEN eliyor: matcher.py tür uyuşmazlığında
+    #             adayı `species_mismatch` ile bloke ediyor. Yani hayvansız bir
+    #             fotoğrafa "dog" demek, kayıp bir kediyi eşleşme listesinden
+    #             düşürüyor.
+    #
+    # Ölçüm (26 etiketli hayvansız fotoğraf + 81 gerçek hayvan fotoğrafı, CLIP):
+    #   hayvansız kümede tür atanan 3 foto -> hayvan_toplam 0.115 · 0.208 · 0.322
+    #   gerçek hayvanlarda tür atanan 78 foto -> EN DÜŞÜK hayvan_toplam 0.761
+    # İki küme arasında 2,4 katlık bir boşluk var; 0.5 ortasına düşüyor.
+    # Bu eşikte hayvansız kümedeki 3 yanlış atamanın ÜÇÜ de siliniyor ve
+    # gerçek hayvanlardaki 78 atamanın HİÇBİRİ kaybolmuyor (0.40–0.70 aralığının
+    # tamamında kayıp 0). Yeniden ölçmek için: scripts/hayvansiz_olcum.py
+    #
+    # ⚠ Kapının kendisi hâlâ CLIP'in "hayvan var mı" skoruna güveniyor; bu
+    # skorun hayvansız fotoğraflardaki yanlış pozitif oranı %27 (7/26) ve o
+    # SORUN OLARAK DURUYOR — burada kapatılan şey, o yanlış pozitifin türe
+    # (dolayısıyla eşleştirmeye) sızması.
+    SPECIES_GATE_MIN = float(os.getenv("SPECIES_GATE_MIN", "0.50"))
     # Cins güveni bunun altındaysa isim döndürülmez (yanlış cins göstermektense boş bırak).
     # 0.70 ölçümle seçildi (scripts/measure_breed.py, 111 fotoğraf):
     #   eşik 0.00 → fotoğrafların %100'üne cins verilir, verilenlerin %78'i doğru
@@ -277,9 +301,18 @@ class AttributeAnalyzer:
 
         Güven her zaman "en olası hayvan sınıfının olasılığı"dır — çeldirici
         kazansa bile bu değer anlamını korur.
-        Tür 'unknown' iki farklı sebeple dönebilir:
+        Tür 'unknown' ÜÇ farklı sebeple dönebilir:
           - is_pet=False : kazanan bir çeldirici, yani fotoğrafta kedi/köpek yok
           - is_pet=True  : hayvan var ama kedi/köpek ayrımı yeterince net değil
+          - is_pet=True  : hayvan kanıtı tür atamaya YETECEK kadar güçlü değil
+                           (hayvan_toplam < SPECIES_GATE_MIN)
+
+        Üçüncü durum 20.08.2026'da eklendi. Ölçümde hayvansız 26 fotoğrafın
+        3'üne kendinden emin biçimde "dog" deniyordu (yangın tüpü, şelale);
+        `is_pet` kapısı onları hayvan sanmıştı ve kedi/köpek yarışması iki
+        seçenek üzerinden yapıldığı için güven doygunlaşıyordu — %82 "köpek".
+        `species_confidence` "fotoğrafta hayvan var mı" sorusunu HİÇ ölçmez,
+        yalnız "hayvansa hangisi" sorusunu ölçer; tek başına kapı olamaz.
         """
         if not isinstance(img_feat, torch.Tensor):
             img_feat = torch.tensor(img_feat, dtype=torch.float32).unsqueeze(0)
@@ -303,7 +336,11 @@ class AttributeAnalyzer:
         en_iyi = int(tur_probs.argmax())
         guven = float(tur_probs[en_iyi])
 
-        if not hayvan_mi or guven < self.SPECIES_MIN_PROB:
+        # Tür ataması için hayvan kanıtının KENDİSİ de yeterli olmalı: is_pet
+        # kapısı bilerek gevşek (kimseyi elemesin diye), tür ise eliyor.
+        if (not hayvan_mi
+                or hayvan_toplam < self.SPECIES_GATE_MIN
+                or guven < self.SPECIES_MIN_PROB):
             return "unknown", guven, hayvan_mi
         return self._species_keys[en_iyi], guven, True
 
