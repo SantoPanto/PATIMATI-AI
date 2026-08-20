@@ -161,7 +161,7 @@ hepsi `-e` / `--env-file` ile geçilir):
 - `PHOTO_ALLOWED_HOSTS` — **boş bırakılırsa hiçbir fotoğraf indirilmez** ve her
   analiz boş döner. Üretimde CDN alan adı yazılır.
 - `MATCH_THRESHOLD` — bildirim eşiği. Çalışan değeri `/health` döndürür.
-- `AI_API_KEY` — uçların paylaşılan anahtarı (sözleşme §10). Verilirse
+- `AI_API_KEY` — uçların paylaşılan anahtarı (sözleşme §10). **Zorunludur.**
   `/analyze`, `/analyze_url`, `/compare`, `/match` `X-Api-Key` ister; `/health`
   açık kalır. **Verilmezse uçlar kimliksizdir** — bilinçli ama sessiz değil:
   açılışta uyarı yazılır, `/health` `api_anahtari_zorunlu` alanıyla gerçeği
