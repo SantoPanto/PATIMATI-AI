@@ -59,6 +59,43 @@ logger = logging.getLogger(__name__)
 # KAYBETTİRMEZ, yalnızca bildirim gönderilenleri azaltır.
 MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.80"))
 
+# --- Skor kanallarının ağırlıkları ve konum cezasının sertliği ---------------
+#
+# NEDEN ORTAMDAN: 19.08 ölçümü, aynı hayvanın birebir aynı fotoğrafının
+# 3 km uzaktayken eşiği geçemediğini gösterdi (görsel 0.9417, etiket 0.4800,
+# skor 0.7558 < 0.80); cebirsel azami mesafe 432 m çıktı — oysa aday arama
+# yarıçapı 25 km. Ama hangi sayının doğru olduğu ÖLÇÜLMEDEN bilinemez:
+# bir sayıyı gevşetmek yanlış-pozitif üretir ve o etki ancak çok bireyli
+# veriyle ölçülür (scripts/yanlis_pozitif_egrisi.py bunu üretiyor).
+#
+# Bu yüzden burada hiçbir sayı DEĞİŞTİRİLMİYOR; yalnız ölçüm sonucuna göre
+# dağıtım yapmadan denenebilir hâle getiriliyor. Varsayılanlar eski
+# davranışın birebir aynısı.
+GORSEL_AGIRLIK = float(os.getenv("GORSEL_AGIRLIK", "0.55"))
+ETIKET_AGIRLIK = float(os.getenv("ETIKET_AGIRLIK", "0.30"))
+KONUM_AGIRLIK = float(os.getenv("KONUM_AGIRLIK", "0.15"))
+
+# konum = 1 / (1 + km / KONUM_YARI_MESAFE_KM) — bu mesafede konum skoru 0.50.
+KONUM_YARI_MESAFE_KM = float(os.getenv("KONUM_YARI_MESAFE_KM", "5.0"))
+
+# Ağırlıklar toplamı 1 değilse skor artık [0,1] aralığında DEĞİLDİR ve eşik
+# başka bir şey ölçmeye başlar. Sessizce yanlış çalışmaktansa açılmıyoruz:
+# yanlış ayar dağıtımda değil, ilk saniyede görünsün.
+_AGIRLIK_TOPLAMI = GORSEL_AGIRLIK + ETIKET_AGIRLIK + KONUM_AGIRLIK
+if abs(_AGIRLIK_TOPLAMI - 1.0) > 1e-9:
+    raise ValueError(
+        "Skor ağırlıklarının toplamı 1.0 olmalı; şu an %.4f "
+        "(GORSEL_AGIRLIK=%.4f, ETIKET_AGIRLIK=%.4f, KONUM_AGIRLIK=%.4f). "
+        "Toplam 1 değilse eşik (%.2f) artık aynı şeyi ölçmez."
+        % (_AGIRLIK_TOPLAMI, GORSEL_AGIRLIK, ETIKET_AGIRLIK, KONUM_AGIRLIK,
+           MATCH_THRESHOLD))
+
+if KONUM_YARI_MESAFE_KM <= 0:
+    raise ValueError(
+        "KONUM_YARI_MESAFE_KM pozitif olmalı; şu an %.4f. "
+        "Sıfır ya da negatif değer konum skorunu tanımsız yapar."
+        % KONUM_YARI_MESAFE_KM)
+
 # Sözleşmede aday üst sınırı 100; burada da zorluyoruz ki gelen liste büyükse
 # sessizce boğulmak yerine kırpıp raporlayalım (bkz. sözleşme §5).
 AZAMI_ADAY = int(os.getenv("MAX_CANDIDATES", "100"))
@@ -138,7 +175,10 @@ def jaccard_score(labels_a: list, labels_b: list) -> float:
 def location_score(distance_km: float | None) -> float:
     """
     Mesafe bazlı skor: yakınsa yüksek, uzaksa düşük.
+    Varsayılan yarı-mesafeyle (5 km):
     0 km → 1.00, 5 km → 0.50, 20 km → 0.20, 50 km → 0.09
+    Eğri KONUM_YARI_MESAFE_KM ile ayarlanır; yukarıdaki sayılar
+    varsayılana aittir, sabit değildir.
 
     Negatif mesafe fiziksel olarak anlamsızdır ama gelirse iki ayrı hataya yol
     açıyordu: -5 km ZeroDivisionError ile servisi çökertiyor, -1 km ise 1.25
@@ -155,7 +195,8 @@ def location_score(distance_km: float | None) -> float:
     """
     if distance_km is None or not np.isfinite(distance_km):
         return 0.0
-    return 1.0 / (1.0 + max(0.0, float(distance_km)) / 5.0)
+    return 1.0 / (1.0 + max(0.0, float(distance_km))
+                  / KONUM_YARI_MESAFE_KM)
 
 
 def compute_final_score(
@@ -236,7 +277,9 @@ def compute_final_score(
 
     # Kosinüs teorik olarak negatif olabildiği için toplam da [0,1] dışına
     # çıkabilir; skor her zaman yorumlanabilir bir aralıkta kalsın.
-    score = (0.55 * visual) + (0.30 * label) + (0.15 * location)
+    score = ((GORSEL_AGIRLIK * visual)
+             + (ETIKET_AGIRLIK * label)
+             + (KONUM_AGIRLIK * location))
     
     # Bonus özellikler uyuşmazsa ceza vermez, eşleşirse +0.02 bonus verir
     for ba in bonus_a:
