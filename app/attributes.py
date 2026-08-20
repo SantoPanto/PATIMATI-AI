@@ -140,15 +140,16 @@ HARD_PROMPTS = {
 
 # 2. SOFT (Geçici) Özellikler (Bonus veren, ceza vermeyen)
 SOFT_PROMPTS = {
-    "collar": {
-        "keys": ["collar", "no_collar", "unknown", "unknown2"],
-        "prompts": [
-            "a photo of a pet wearing a collar around its neck",
-            "a photo of a pet with no collar",
-            "a photo of an animal's face only, no neck visible",
-            "a photo of an unrecognizable object"
-        ]
-    },
+      "collar": {
+          "keys": ["collar", "no_collar", "unknown", "unknown2", "unknown_fur"],
+          "prompts": [
+              "a photo of a pet wearing a distinct, brightly colored collar or harness around its neck",
+              "a photo of a pet's bare neck with no collar",
+              "a photo of an animal's face only, no neck visible",
+              "a photo of an unrecognizable object",
+              "a photo of a pet with thick natural fur or shadows around its neck, but no collar"
+          ]
+      },
     "ear_tag": {
         "keys": ["tag", "no_tag", "unknown", "unknown2"],
         "prompts": [
