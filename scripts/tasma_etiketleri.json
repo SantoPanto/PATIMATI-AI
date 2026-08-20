@@ -1,0 +1,19 @@
+{
+  "_aciklama": "Tasma tespiti icin GOZLE etiketlenmis kucuk kume. Kaynak: data/MPDD (tam boy evcil/sokak kopegi fotograflari, CC BY 4.0). Her deger MPDD'deki birey klasoru; betik o klasordeki ILK .jpg dosyasini kullanir.",
+  "_neden": "Kedi kumesi (CatIndividualImages) barinak kedilerinden olusuyor ve cogunda zaten tasma yok; orada 'her seye tasma yok' diyen bir model de kusursuz gorunur. Dogru pozitif tarafi ancak tasmasi BILINEN fotograflarla olculebilir.",
+  "_etiketleyen": "Ibrahim, 21.08.2026, kontak baskisiyla gozle",
+  "_sinir": "Etiketler tek kisinin gozune dayaniyor ve dusuk cozunurluklu birkac fotograf 'belirsiz' diye HIC alinmadi. Yani bu kume kesin dogru degil, olculebilir bir taban. Suphelendigin bir satiri sil, gerekcesini buraya yaz.",
+  "_belirsiz_alinmayanlar": "Cok kucuk/karanlik ya da boynu hic gorunmeyen kareler disarida birakildi (or. 14, 17, 22, 25, 27, 29, 30, 36, 43, 48, 57, 60, 70). Giysili ama tasmasi gorunmeyenler de disarida (42, 46, 74, 78) - giysi tasma degildir.",
+
+  "tasmali": [
+    "0", "4", "6", "18", "20", "23", "24", "26", "33",
+    "44", "47", "52", "55", "58",
+    "61", "63", "66", "67", "69", "71", "72"
+  ],
+
+  "tasmasiz": [
+    "1", "2", "3", "5", "7", "8", "9", "11", "12", "13",
+    "15", "16", "19", "21", "28", "31", "32", "34", "35",
+    "37", "38", "39"
+  ]
+}
