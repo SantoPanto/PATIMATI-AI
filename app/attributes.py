@@ -143,7 +143,7 @@ SOFT_PROMPTS = {
       "collar": {
           "keys": ["collar", "no_collar", "unknown", "unknown2", "unknown_fur"],
           "prompts": [
-              "a photo of a pet wearing a distinct, brightly colored collar or harness around its neck",
+              "a photo of a pet wearing a collar or harness around its neck",
               "a photo of a pet's bare neck with no collar",
               "a photo of an animal's face only, no neck visible",
               "a photo of an unrecognizable object",
