@@ -3,6 +3,7 @@
 # 1) Servisi başlat:  venv\Scripts\python.exe -m uvicorn app.main:app --port 8000
 # 2) Bu betiği çalıştır:  venv\Scripts\python.exe scripts\demo_match.py
 #    (istersen kendi fotoğraflarınla: ... demo_match.py kayip.jpg aday1.jpg aday2.jpg)
+import os
 import sys
 from pathlib import Path
 
@@ -10,10 +11,15 @@ import httpx
 
 BASE = "http://127.0.0.1:8000"
 
+# Korumalı uçlar anahtar ister ve anahtar YOKSA DA reddeder (bkz.
+# app/main.py `anahtari_dogrula`). Servisi hangi AI_API_KEY ile başlattıysan
+# bu betiği de aynı değerle çalıştır, yoksa her istek 401 döner.
+BASLIKLAR = {"X-Api-Key": os.getenv("AI_API_KEY", "")}
+
 
 def analyze(path):
     with open(path, "rb") as f:
-        r = httpx.post(f"{BASE}/analyze",
+        r = httpx.post(f"{BASE}/analyze", headers=BASLIKLAR,
                        files={"file": (Path(path).name, f, "image/jpeg")}, timeout=120)
     r.raise_for_status()
     return r.json()
@@ -50,7 +56,7 @@ for i, p in enumerate([aday1, aday2], 1):
                     # eski vektörlerle sessizce kıyaslama yapılmasın diye.
                     "model_version": c["model_version"]})
 
-r = httpx.post(f"{BASE}/match",
+r = httpx.post(f"{BASE}/match", headers=BASLIKLAR,
                json={"ad_id": 999, "embeddings": [a["embedding"]], "labels": a["labels"],
                      "species": a["species"], "candidates": adaylar}, timeout=120)
 r.raise_for_status()

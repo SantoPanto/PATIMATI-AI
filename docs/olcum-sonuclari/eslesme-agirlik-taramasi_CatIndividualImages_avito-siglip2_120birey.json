@@ -1,0 +1,390 @@
+{
+  "model": "siglip2-animal",
+  "model_surumu": "siglip2-animal/v2",
+  "veri": "CatIndividualImages",
+  "birey": 120,
+  "pozitif_cift": 120,
+  "negatif_cift": 1500,
+  "agirliklar": {
+    "gorsel": 0.55,
+    "etiket": 0.3,
+    "konum": 0.15,
+    "yari_mesafe_km": 5.0
+  },
+  "olcum": [
+    {
+      "mesafe_km": 0.0,
+      "esik": 0.8,
+      "duyarlilik": 0.9417,
+      "yanlis_pozitif": 0.018
+    },
+    {
+      "mesafe_km": 0.0,
+      "esik": 0.78,
+      "duyarlilik": 0.9583,
+      "yanlis_pozitif": 0.0287
+    },
+    {
+      "mesafe_km": 0.0,
+      "esik": 0.76,
+      "duyarlilik": 0.975,
+      "yanlis_pozitif": 0.0373
+    },
+    {
+      "mesafe_km": 0.0,
+      "esik": 0.75,
+      "duyarlilik": 0.975,
+      "yanlis_pozitif": 0.0447
+    },
+    {
+      "mesafe_km": 0.0,
+      "esik": 0.72,
+      "duyarlilik": 0.9917,
+      "yanlis_pozitif": 0.0653
+    },
+    {
+      "mesafe_km": 0.0,
+      "esik": 0.7,
+      "duyarlilik": 1.0,
+      "yanlis_pozitif": 0.08
+    },
+    {
+      "mesafe_km": 0.0,
+      "esik": 0.68,
+      "duyarlilik": 1.0,
+      "yanlis_pozitif": 0.0993
+    },
+    {
+      "mesafe_km": 0.0,
+      "esik": 0.65,
+      "duyarlilik": 1.0,
+      "yanlis_pozitif": 0.1353
+    },
+    {
+      "mesafe_km": 1.0,
+      "esik": 0.8,
+      "duyarlilik": 0.9333,
+      "yanlis_pozitif": 0.012
+    },
+    {
+      "mesafe_km": 1.0,
+      "esik": 0.78,
+      "duyarlilik": 0.9417,
+      "yanlis_pozitif": 0.018
+    },
+    {
+      "mesafe_km": 1.0,
+      "esik": 0.76,
+      "duyarlilik": 0.9583,
+      "yanlis_pozitif": 0.0253
+    },
+    {
+      "mesafe_km": 1.0,
+      "esik": 0.75,
+      "duyarlilik": 0.9583,
+      "yanlis_pozitif": 0.0307
+    },
+    {
+      "mesafe_km": 1.0,
+      "esik": 0.72,
+      "duyarlilik": 0.9833,
+      "yanlis_pozitif": 0.048
+    },
+    {
+      "mesafe_km": 1.0,
+      "esik": 0.7,
+      "duyarlilik": 0.9917,
+      "yanlis_pozitif": 0.062
+    },
+    {
+      "mesafe_km": 1.0,
+      "esik": 0.68,
+      "duyarlilik": 0.9917,
+      "yanlis_pozitif": 0.0753
+    },
+    {
+      "mesafe_km": 1.0,
+      "esik": 0.65,
+      "duyarlilik": 1.0,
+      "yanlis_pozitif": 0.1047
+    },
+    {
+      "mesafe_km": 3.0,
+      "esik": 0.8,
+      "duyarlilik": 0.9167,
+      "yanlis_pozitif": 0.0067
+    },
+    {
+      "mesafe_km": 3.0,
+      "esik": 0.78,
+      "duyarlilik": 0.9333,
+      "yanlis_pozitif": 0.01
+    },
+    {
+      "mesafe_km": 3.0,
+      "esik": 0.76,
+      "duyarlilik": 0.9417,
+      "yanlis_pozitif": 0.0147
+    },
+    {
+      "mesafe_km": 3.0,
+      "esik": 0.75,
+      "duyarlilik": 0.9417,
+      "yanlis_pozitif": 0.018
+    },
+    {
+      "mesafe_km": 3.0,
+      "esik": 0.72,
+      "duyarlilik": 0.9583,
+      "yanlis_pozitif": 0.0307
+    },
+    {
+      "mesafe_km": 3.0,
+      "esik": 0.7,
+      "duyarlilik": 0.975,
+      "yanlis_pozitif": 0.0387
+    },
+    {
+      "mesafe_km": 3.0,
+      "esik": 0.68,
+      "duyarlilik": 0.9917,
+      "yanlis_pozitif": 0.0527
+    },
+    {
+      "mesafe_km": 3.0,
+      "esik": 0.65,
+      "duyarlilik": 0.9917,
+      "yanlis_pozitif": 0.0747
+    },
+    {
+      "mesafe_km": 5.0,
+      "esik": 0.8,
+      "duyarlilik": 0.8583,
+      "yanlis_pozitif": 0.0047
+    },
+    {
+      "mesafe_km": 5.0,
+      "esik": 0.78,
+      "duyarlilik": 0.9167,
+      "yanlis_pozitif": 0.0067
+    },
+    {
+      "mesafe_km": 5.0,
+      "esik": 0.76,
+      "duyarlilik": 0.9333,
+      "yanlis_pozitif": 0.01
+    },
+    {
+      "mesafe_km": 5.0,
+      "esik": 0.75,
+      "duyarlilik": 0.9333,
+      "yanlis_pozitif": 0.012
+    },
+    {
+      "mesafe_km": 5.0,
+      "esik": 0.72,
+      "duyarlilik": 0.9417,
+      "yanlis_pozitif": 0.0193
+    },
+    {
+      "mesafe_km": 5.0,
+      "esik": 0.7,
+      "duyarlilik": 0.9583,
+      "yanlis_pozitif": 0.0307
+    },
+    {
+      "mesafe_km": 5.0,
+      "esik": 0.68,
+      "duyarlilik": 0.975,
+      "yanlis_pozitif": 0.04
+    },
+    {
+      "mesafe_km": 5.0,
+      "esik": 0.65,
+      "duyarlilik": 0.9917,
+      "yanlis_pozitif": 0.062
+    },
+    {
+      "mesafe_km": 10.0,
+      "esik": 0.8,
+      "duyarlilik": 0.775,
+      "yanlis_pozitif": 0.0013
+    },
+    {
+      "mesafe_km": 10.0,
+      "esik": 0.78,
+      "duyarlilik": 0.85,
+      "yanlis_pozitif": 0.0033
+    },
+    {
+      "mesafe_km": 10.0,
+      "esik": 0.76,
+      "duyarlilik": 0.9083,
+      "yanlis_pozitif": 0.0067
+    },
+    {
+      "mesafe_km": 10.0,
+      "esik": 0.75,
+      "duyarlilik": 0.9167,
+      "yanlis_pozitif": 0.0067
+    },
+    {
+      "mesafe_km": 10.0,
+      "esik": 0.72,
+      "duyarlilik": 0.9417,
+      "yanlis_pozitif": 0.014
+    },
+    {
+      "mesafe_km": 10.0,
+      "esik": 0.7,
+      "duyarlilik": 0.9417,
+      "yanlis_pozitif": 0.018
+    },
+    {
+      "mesafe_km": 10.0,
+      "esik": 0.68,
+      "duyarlilik": 0.9583,
+      "yanlis_pozitif": 0.0287
+    },
+    {
+      "mesafe_km": 10.0,
+      "esik": 0.65,
+      "duyarlilik": 0.975,
+      "yanlis_pozitif": 0.0447
+    },
+    {
+      "mesafe_km": 25.0,
+      "esik": 0.8,
+      "duyarlilik": 0.5917,
+      "yanlis_pozitif": 0.0
+    },
+    {
+      "mesafe_km": 25.0,
+      "esik": 0.78,
+      "duyarlilik": 0.7583,
+      "yanlis_pozitif": 0.0013
+    },
+    {
+      "mesafe_km": 25.0,
+      "esik": 0.76,
+      "duyarlilik": 0.825,
+      "yanlis_pozitif": 0.0027
+    },
+    {
+      "mesafe_km": 25.0,
+      "esik": 0.75,
+      "duyarlilik": 0.8583,
+      "yanlis_pozitif": 0.0047
+    },
+    {
+      "mesafe_km": 25.0,
+      "esik": 0.72,
+      "duyarlilik": 0.9333,
+      "yanlis_pozitif": 0.0073
+    },
+    {
+      "mesafe_km": 25.0,
+      "esik": 0.7,
+      "duyarlilik": 0.9333,
+      "yanlis_pozitif": 0.012
+    },
+    {
+      "mesafe_km": 25.0,
+      "esik": 0.68,
+      "duyarlilik": 0.9417,
+      "yanlis_pozitif": 0.018
+    },
+    {
+      "mesafe_km": 25.0,
+      "esik": 0.65,
+      "duyarlilik": 0.9583,
+      "yanlis_pozitif": 0.0307
+    }
+  ],
+  "agirlik_taramasi": [
+    {
+      "kurulum": "bugun          0.55/0.30/0.15",
+      "mesafe_km": 0.0,
+      "esik": 0.8,
+      "duyarlilik": 0.9417,
+      "yanlis_pozitif": 0.018
+    },
+    {
+      "kurulum": "bugun          0.55/0.30/0.15",
+      "mesafe_km": 5.0,
+      "esik": 0.8,
+      "duyarlilik": 0.8583,
+      "yanlis_pozitif": 0.0047
+    },
+    {
+      "kurulum": "bugun          0.55/0.30/0.15",
+      "mesafe_km": 25.0,
+      "esik": 0.8,
+      "duyarlilik": 0.5917,
+      "yanlis_pozitif": 0.0
+    },
+    {
+      "kurulum": "konum hafif    0.65/0.30/0.05",
+      "mesafe_km": 0.0,
+      "esik": 0.8,
+      "duyarlilik": 0.9417,
+      "yanlis_pozitif": 0.0147
+    },
+    {
+      "kurulum": "konum hafif    0.65/0.30/0.05",
+      "mesafe_km": 5.0,
+      "esik": 0.8,
+      "duyarlilik": 0.9333,
+      "yanlis_pozitif": 0.0087
+    },
+    {
+      "kurulum": "konum hafif    0.65/0.30/0.05",
+      "mesafe_km": 25.0,
+      "esik": 0.8,
+      "duyarlilik": 0.925,
+      "yanlis_pozitif": 0.0067
+    },
+    {
+      "kurulum": "etiket hafif   0.65/0.20/0.15",
+      "mesafe_km": 0.0,
+      "esik": 0.8,
+      "duyarlilik": 0.975,
+      "yanlis_pozitif": 0.024
+    },
+    {
+      "kurulum": "etiket hafif   0.65/0.20/0.15",
+      "mesafe_km": 5.0,
+      "esik": 0.8,
+      "duyarlilik": 0.9333,
+      "yanlis_pozitif": 0.006
+    },
+    {
+      "kurulum": "etiket hafif   0.65/0.20/0.15",
+      "mesafe_km": 25.0,
+      "esik": 0.8,
+      "duyarlilik": 0.7667,
+      "yanlis_pozitif": 0.0
+    },
+    {
+      "kurulum": "konum yok      0.70/0.30/0.00",
+      "mesafe_km": 0.0,
+      "esik": 0.8,
+      "duyarlilik": 0.9417,
+      "yanlis_pozitif": 0.012
+    },
+    {
+      "kurulum": "konum yok      0.70/0.30/0.00",
+      "mesafe_km": 5.0,
+      "esik": 0.8,
+      "duyarlilik": 0.9417,
+      "yanlis_pozitif": 0.012
+    },
+    {
+      "kurulum": "konum yok      0.70/0.30/0.00",
+      "mesafe_km": 25.0,
+      "esik": 0.8,
+      "duyarlilik": 0.9417,
+      "yanlis_pozitif": 0.012
+    }
+  ]
+}

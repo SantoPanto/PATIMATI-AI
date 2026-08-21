@@ -110,9 +110,10 @@ class KimlikGomucu:
     bu sınıf ise yalnızca kimlik vektörünü. Ölçümle ayrıldılar — kimlik için
     ince ayarlanmış modeller etiket işini yapamıyor (bkz. app/surum.py başlığı).
 
-    Seçim `KIMLIK_MODEL` ortam değişkeniyle yapılır. Varsayılan "clip" ise
-    AYRI BİR MODEL YÜKLENMEZ; etiketçi CLIP kimlik için de kullanılır, ek bellek
-    maliyeti sıfır olur ve davranış eskisiyle birebir aynı kalır.
+    Seçim `KIMLIK_MODEL` ortam değişkeniyle yapılır; varsayılanı app/surum.py
+    tutuyor ("siglip2-animal"). "clip" SEÇİLİYSE ayrı bir model YÜKLENMEZ;
+    etiketçi CLIP kimlik için de kullanılır, ek bellek maliyeti sıfır olur.
+    Diğer seçeneklerde süreç başına İKİ model yüklenir.
     """
 
     def __init__(self, secim: dict, etiketci: PetEmbedder):
