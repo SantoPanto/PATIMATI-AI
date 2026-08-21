@@ -138,9 +138,21 @@ def test_liste_doluyken_listede_olmayan_alan_adi_reddedilir(monkeypatch):
     (Adres DNS'e gitmeden reddedilir — bu dosyadaki testler ağa çıkmaz.)
     """
     monkeypatch.setattr(indirici, "IZINLI_HOSTLAR",
-                        ["patimati-media.s3.eu-central-1.amazonaws.com"])
+                        ["media.patimati.me"])
     with pytest.raises(FotografIndirilemedi, match="beyaz listede değil"):
         indirici.dogrula("https://kotu-site.com/a.jpg")
+
+
+def test_media_patimati_me_beyaz_listede_ve_dogrulanir(monkeypatch):
+    """Production medya domainimiz media.patimati.me listedeyken doğrulama başarılı olmalı,
+    farklı domainler engellenmeye devam etmeli."""
+    monkeypatch.setattr(indirici, "IZINLI_HOSTLAR", ["media.patimati.me"])
+    # media.patimati.me HTTPS adresi doğrulamadan geçmeli (DNS çözümü ile)
+    indirici.dogrula("https://media.patimati.me/ads/2026/08/b77ea941-0f06-4fdd-8291-898018f9ec4c.jpg")
+    
+    # Beyaz listede olmayan başka rastgele domain reddedilmeli
+    with pytest.raises(FotografIndirilemedi, match="beyaz listede değil"):
+        indirici.dogrula("https://rastgele-site.com/ads/test.jpg")
 
 
 # --------------------------------------------------------------------------
