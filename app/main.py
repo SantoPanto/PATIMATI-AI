@@ -148,7 +148,8 @@ def _oznitelik_cikar(img_bytes: bytes, embedding: list[float] | None) -> dict:
         logger.error(f"Öznitelik çıkarma hatası (etiketsiz devam ediliyor): {e}")
         return {"labels": [], "species": "unknown", "species_confidence": 0.0,
                 "is_pet": True, "breed": None, "breed_confidence": 0.0,
-                "pattern": None, "colors": []}
+                "pattern": None, "colors": [],
+                "is_designed_graphic": False, "graphic_confidence": 0.0}
 
 
 async def _goruntuyu_isle(img_bytes: bytes) -> tuple[list[float], dict]:
@@ -178,7 +179,7 @@ async def analyze(file: UploadFile = File(...)):
     Fotoğrafı analiz et: embedding çıkar + label al.
     Hem kayıp hem buldum ilanı oluşturulurken çağrılır.
     """
-    if not file.content_type.startswith("image/"):
+    if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(400, "Yalnızca görüntü dosyaları kabul edilir.")
 
     img_bytes = await file.read()
@@ -198,6 +199,8 @@ async def analyze(file: UploadFile = File(...)):
         pattern=vision["pattern"],
         colors=vision["colors"],
         model_version=MODEL_SURUMU,
+        is_designed_graphic=vision["is_designed_graphic"],
+        graphic_confidence=vision["graphic_confidence"],
     )
 
 
@@ -238,7 +241,7 @@ async def compare(
     """
     analyses = []
     for f in (file1, file2):
-        if not f.content_type.startswith("image/"):
+        if not f.content_type or not f.content_type.startswith("image/"):
             raise HTTPException(400, "Yalnızca görüntü dosyaları kabul edilir.")
         img_bytes = await f.read()
         if len(img_bytes) > 10 * 1024 * 1024:
@@ -265,17 +268,34 @@ async def compare(
 @app.post("/match", dependencies=[Depends(anahtari_dogrula)])
 async def match(req: MatchRequest):
     """
-    Yeni ilan ile mevcut ilanları karşılaştır, skorla sırala.
+    Yeni ilan/external kayıt ile mevcut adayları karşılaştır, skorla sırala.
 
     Elenen adaylar `skipped_candidates` altında gerekçesiyle raporlanır —
     "hiç eşleşme çıkmadı" durumunun sebebi görünür olsun diye.
     DİKKAT: adayların `model_version` alanı bu servisin sürümüyle aynı değilse
     aday ATLANIR (farklı sürümlerin vektörleri kıyaslanamaz).
+
+    Faz 2 (Instagram entegrasyonu) — bu uç, external_pet_records için "Aşama 2"
+    eşleştirme çağrısının hedefidir: Java, Aşama 1'de (ai.analysis.request
+    kuyruğu üzerinden, adaysız) zaten üretilmiş embedding/etiket/tür bilgisini
+    buraya senkron olarak gönderir. `req.external_record_id` sorgunun kendi
+    kimliğidir (ad_id ile aynı anda dolu olamaz — bkz. models.py); adaylar da
+    kendi `ad_id`/`external_record_id` çiftini taşır. `req.match_threshold`
+    verilmezse bu servisin ortam değişkeni varsayılanı (MATCH_THRESHOLD)
+    kullanılır — native davranış hiç değişmez.
     """
     try:
-        matches, atlanan = adaylari_eslestir(
+        # run_in_threadpool: adaylari_eslestir CPU'ya bağlı (yüzlerce adayla
+        # cosine similarity) senkron bir iştir -- /analyze ve /compare aynı
+        # sebeple havuza atıyor (bkz. _goruntuyu_isle), burası da tutarlı
+        # olmalı; aksi hâlde yoğun bir /match isteği olay döngüsünü bloklar,
+        # /health bile o sırada yanıtsız kalır.
+        matches, atlanan = await run_in_threadpool(
+            adaylari_eslestir,
             embeddings=req.embeddings, labels=req.labels, species=req.species,
             candidates=req.candidates, ad_id=req.ad_id,
+            external_record_id=req.external_record_id,
+            threshold=req.match_threshold,
         )
     except Exception as e:  # sorgu vektörünün kendisi bozuksa
         logger.error(f"Eşleştirme hatası: {e}")

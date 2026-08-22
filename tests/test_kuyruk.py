@@ -14,9 +14,9 @@ import json
 import numpy as np
 import pytest
 
-from app import kuyruk
+from app import kuyruk, topoloji
 from app.kuyruk import (DLQ, DLX, EXCHANGE, ISTEK_ANAHTARI, ISTEK_KUYRUGU,
-                        SEMA_SURUMU, SONUC_ANAHTARI, SONUC_KUYRUGU,
+                        SEMA_SURUMU, SONUC_ANAHTARI, SONUC_DLQ, SONUC_KUYRUGU,
                         istegi_isle, topolojiyi_kur)
 from app.surum import MODEL_SURUMU, VEKTOR_BOYUTU
 
@@ -44,6 +44,14 @@ def istek(**degisiklikler):
 def aday(ad_id=98, species="cat", model_version=None):
     return {"ad_id": ad_id, "embeddings": [vektor(1)], "labels": ["cat", "tabby"],
             "species": species, "distance_km": 1.0,
+            "model_version": model_version or MODEL_SURUMU}
+
+
+def external_aday(external_record_id=98, species="cat", model_version=None):
+    """Faz 2: ad_id yerine external_record_id ile kimliklenen bir aday
+    (Instagram kökenli external_pet_records kaydı)."""
+    return {"external_record_id": external_record_id, "embeddings": [vektor(1)],
+            "labels": ["cat", "tabby"], "species": species, "distance_km": 1.0,
             "model_version": model_version or MODEL_SURUMU}
 
 
@@ -229,6 +237,135 @@ def test_beyan_yoksa_ai_tahmini_kullanilir(sahte_analiz):
 
 
 # --------------------------------------------------------------------------
+# Faz 2 — metin analizi tetikleme kuralı (caption VEYA triggering_comment)
+# --------------------------------------------------------------------------
+
+def test_caption_ve_yorum_bossa_nlp_attributes_bos_kalir(sahte_analiz):
+    """Regresyon koruması: native ilan akışı hiçbir zaman caption/comment
+    göndermez — nlp_attributes/extracted_features eskisi gibi tam boş kalmalı."""
+    sahte_analiz()
+    sonuc = istegi_isle(istek())
+    assert sonuc["nlp_attributes"] == {}
+    assert sonuc["extracted_features"] == []
+
+
+def test_yalnizca_caption_varsa_metin_analizi_calisir(sahte_analiz, monkeypatch):
+    from app.models import TextAnalysisResult
+
+    cagrilar = []
+
+    class _SahteAnalyzer:
+        def analyze(self, caption, triggering_comment):
+            cagrilar.append((caption, triggering_comment))
+            return TextAnalysisResult(category="ADOPTION", category_confidence=0.7)
+
+    monkeypatch.setattr(kuyruk, "get_text_analyzer", lambda: _SahteAnalyzer())
+    sahte_analiz()
+    sonuc = istegi_isle(istek(caption="Sahiplendirilecek yavru kedi"))
+
+    assert cagrilar == [("Sahiplendirilecek yavru kedi", None)]
+    assert sonuc["nlp_attributes"]["category"] == "ADOPTION"
+
+
+def test_yorum_varsa_caption_bos_olsa_da_nlp_calisir(sahte_analiz, monkeypatch):
+    """BUG DÜZELTMESİ: eski davranış yalnızca `caption` doluysa metin analizini
+    çalıştırıyordu. Ama caption boş/alakasız olup triggering_comment'in tek
+    başına anlamlı olduğu durumlar gerçek — "@patimati bu kediyi Görükle'de
+    buldum" gibi bir yorum caption olmadan da FOUND + konum çıkarımı
+    yapılabilmeli. Bu test, yalnızca yorum doluyken analyzer'ın GERÇEKTEN
+    çağrıldığını doğrular (önceki davranışta hiç çağrılmazdı)."""
+    from app.models import TextAnalysisResult
+
+    cagrilar = []
+
+    class _SahteAnalyzer:
+        def analyze(self, caption, triggering_comment):
+            cagrilar.append((caption, triggering_comment))
+            return TextAnalysisResult(
+                category="FOUND", category_confidence=0.85,
+                location_text="Bursa, Görükle")
+
+    monkeypatch.setattr(kuyruk, "get_text_analyzer", lambda: _SahteAnalyzer())
+    sahte_analiz()
+    sonuc = istegi_isle(istek(
+        caption=None,
+        triggering_comment="@patimati bu kediyi Görükle'de buldum, sahibi ulaşsın"))
+
+    assert len(cagrilar) == 1, "caption boşken ve yorum doluyken analyzer çağrılmadı"
+    assert cagrilar[0] == (None, "@patimati bu kediyi Görükle'de buldum, sahibi ulaşsın")
+    assert sonuc["nlp_attributes"]["category"] == "FOUND"
+    assert sonuc["nlp_attributes"]["location_text"] == "Bursa, Görükle"
+    assert sonuc["nlp_attributes"] != {}
+
+
+def test_bos_dizeli_caption_ve_yorum_da_bos_sayilir(sahte_analiz, monkeypatch):
+    """Sadece None değil, yalnızca boşluk içeren dizeler de "boş" sayılmalı —
+    aksi halde Java'nın gönderebileceği "" gibi bir değer yanlışlıkla
+    analyzer'ı tetikler."""
+    cagrildi = []
+
+    def _cagrilmamasi_gereken():
+        cagrildi.append(True)
+        raise AssertionError("analyzer hiç çağrılmamalıydı")
+
+    monkeypatch.setattr(kuyruk, "get_text_analyzer", _cagrilmamasi_gereken)
+    sahte_analiz()
+    sonuc = istegi_isle(istek(caption="   ", triggering_comment=""))
+    assert sonuc["nlp_attributes"] == {}
+    assert cagrildi == []
+
+
+# --------------------------------------------------------------------------
+# Faz 2 — external_record_id kimlikli adaylar
+# --------------------------------------------------------------------------
+
+def test_external_record_id_ile_gelen_aday_dogru_eslenir(sahte_analiz):
+    """ad_id yerine external_record_id taşıyan bir aday (Instagram kökenli
+    external_pet_records kaydı) doğru skorlanmalı ve sonuçta kendi
+    external_record_id'siyle geri dönmeli, ad_id ile karıştırılmamalı."""
+    sahte_analiz()
+    sonuc = istegi_isle(istek(candidates=[external_aday(external_record_id=555)]))
+
+    assert len(sonuc["matches"]) == 1
+    eslesme = sonuc["matches"][0]
+    assert eslesme["external_record_id"] == 555
+    assert eslesme["ad_id"] is None
+    assert sonuc["skipped_candidates"]["toplam"] == 0
+
+
+def test_ad_id_ve_external_record_id_ikisi_de_bos_olamaz():
+    """Bir aday ne native bir ilan ne de bir external kayıt olarak
+    kimliklenemiyorsa mesaj INVALID_REQUEST olarak reddedilmeli — sessizce
+    "kimliksiz" bir adayla devam edip kendisi/tekrar eleme mantığını
+    bozmasın (bkz. matcher.py:_aday_kimligi)."""
+    bozuk_aday = aday()
+    del bozuk_aday["ad_id"]  # ne ad_id ne external_record_id kaldı
+    sonuc = istegi_isle(istek(candidates=[bozuk_aday]))
+    assert sonuc["status"] == "error"
+    assert sonuc["error"]["code"] == "INVALID_REQUEST"
+
+
+def test_ad_id_ve_external_record_id_ayni_anda_dolu_olamaz():
+    cift_kimlikli = aday()
+    cift_kimlikli["external_record_id"] = 999
+    sonuc = istegi_isle(istek(candidates=[cift_kimlikli]))
+    assert sonuc["status"] == "error"
+    assert sonuc["error"]["code"] == "INVALID_REQUEST"
+
+
+def test_match_threshold_gonderilirse_kullanilir(sahte_analiz):
+    """match_threshold verilmezse modülün MATCH_THRESHOLD'u kullanılır;
+    verilirse o isteğe özel eşik geçerli olmalı — native davranış değişmeden."""
+    sahte_analiz()
+    # Çok yüksek bir eşik ver: normalde eşleşecek aday artık match=False olmalı.
+    sonuc = istegi_isle(istek(candidates=[aday()], match_threshold=0.999))
+    assert sonuc["matches"][0]["match"] is False
+
+    sonuc_dusuk_esik = istegi_isle(istek(candidates=[aday()], match_threshold=0.0))
+    assert sonuc_dusuk_esik["matches"][0]["match"] is True
+
+
+# --------------------------------------------------------------------------
 # AMQP katmanı — kanal taklidiyle
 # --------------------------------------------------------------------------
 
@@ -274,7 +411,7 @@ def test_topoloji_sozlesmedeki_nesneleri_ilan_eder():
     exchangeler = {o[1] for o in kanal.olaylar if o[0] == "exchange"}
     kuyruklar = {o[1] for o in kanal.olaylar if o[0] == "kuyruk"}
     assert exchangeler == {EXCHANGE, DLX}
-    assert kuyruklar == {ISTEK_KUYRUGU, SONUC_KUYRUGU, DLQ}
+    assert kuyruklar == {ISTEK_KUYRUGU, SONUC_KUYRUGU, DLQ, SONUC_DLQ}
 
 
 def test_dlq_orijinal_yonlendirme_anahtariyla_baglanir():
@@ -297,6 +434,48 @@ def test_istek_kuyrugu_dlx_e_baglidir():
 
     ilan = next(o for o in kanal.olaylar
                 if o[0] == "kuyruk" and o[1] == ISTEK_KUYRUGU)
+    assert ilan[2]["arguments"]["x-dead-letter-exchange"] == DLX
+    assert ilan[2]["durable"] is True
+
+
+def test_sonuc_dlq_orijinal_yonlendirme_anahtariyla_baglanir():
+    """İstek tarafındaki aynı tuzak, sonuç tarafı için de geçerli: SONUC_DLQ
+    kuyruk adıyla değil `analysis.result` anahtarıyla bağlanmalı."""
+    kanal = SahteKanal()
+    topolojiyi_kur(kanal)
+
+    dlq_baglari = [o for o in kanal.olaylar if o[0] == "bag" and o[1] == SONUC_DLQ]
+    assert dlq_baglari == [("bag", SONUC_DLQ, DLX, SONUC_ANAHTARI)]
+
+
+def test_sonuc_kuyrugu_varsayilan_olarak_dlx_e_baglanmaz(monkeypatch):
+    """`SONUC_KUYRUGU_DLQ_ENABLED` KAPALI kalmalı: bu kuyruk Java tarafında
+    çoktan (bu argüman olmadan) canlıda ilan edilmiş olabilir -- argümanı
+    tek taraflı eklemek PRECONDITION_FAILED'a yol açar (bkz. app/topoloji.py).
+    Java'da eşdeğer değişiklik + kuyruğun yeniden kurulmasıyla BİRLİKTE
+    açılana kadar varsayılan kapalı kalır."""
+    monkeypatch.setattr(topoloji, "SONUC_KUYRUGU_DLQ_ENABLED", False)
+    kanal = SahteKanal()
+    topolojiyi_kur(kanal)
+
+    ilan = next(o for o in kanal.olaylar
+                if o[0] == "kuyruk" and o[1] == SONUC_KUYRUGU)
+    assert ilan[2]["arguments"] is None
+    assert ilan[2]["durable"] is True
+
+
+def test_sonuc_kuyrugu_dlx_e_baglidir_flag_acikken(monkeypatch):
+    """Java'daki onResult bir istisna fırlatırsa (ya da mesaj hiç
+    ayrıştırılamazsa) mesaj SONUC_DLQ'ya düşsün diye -- x-dead-letter-exchange
+    yoksa aynı kuyruğa sonsuz döngüyle geri döner (zehirli mesaj). Bu, yalnızca
+    `SONUC_KUYRUGU_DLQ_ENABLED` açıldığında (Java tarafı hazır olduğunda)
+    devreye girer."""
+    monkeypatch.setattr(topoloji, "SONUC_KUYRUGU_DLQ_ENABLED", True)
+    kanal = SahteKanal()
+    topolojiyi_kur(kanal)
+
+    ilan = next(o for o in kanal.olaylar
+                if o[0] == "kuyruk" and o[1] == SONUC_KUYRUGU)
     assert ilan[2]["arguments"]["x-dead-letter-exchange"] == DLX
     assert ilan[2]["durable"] is True
 

@@ -298,3 +298,52 @@ def test_hayvan_olmayan_goruntu_yakalanir():
         assert d["is_pet"] is False, f"{ad}: hayvan sanıldı"
         assert d["species"] == "unknown"
         assert d["breed"] is None, f"{ad}: hayvan değilken cins verildi"
+
+
+# --------------------------------------------------------------------------
+# "Tasarım mı, düz fotoğraf mı?" sinyali (bkz. app/attributes.py:TASARIM_PROMPTS)
+# --------------------------------------------------------------------------
+#
+# ⚠ Gerçek poster/afiş örneği YOK (bkz. docs/olcum-raporu.md §6'nın "oyuncak/
+# çizim hiç denenmedi" notuyla aynı boşluk). Bu yüzden -- tıpkı is_pet
+# kapısının gerçek negatiflerde sentetik testten çok daha kötü çıkmasında
+# olduğu gibi ("Sentetik test yanıltıcıydı", yukarıdaki test_hayvan_
+# olmayan_goruntu_yakalanir'ın bağlamı) -- burada sentetik bir görüntünün
+# "tasarım" ya da "fotoğraf" olarak DOĞRU sınıflandığını iddia eden bir test
+# YAZILMIYOR. Yalnızca sözleşme (alan var mı, tipi doğru mu, sınırlar içinde
+# mi, deterministik mi) sınanıyor -- doğruluk gerçek verilerle ayrıca
+# ölçülecek.
+
+def test_tasarim_sinyali_alan_sozlesmesi():
+    from app.attributes import attribute_analyzer
+
+    d = attribute_analyzer.analyze(jpg(Image.new("RGB", (256, 256), (128, 128, 128))))
+    assert isinstance(d["is_designed_graphic"], bool)
+    assert 0.0 <= d["graphic_confidence"] <= 1.0
+
+
+def test_tasarim_sinyali_deterministik():
+    """Aynı görüntü iki kez analiz edilirse aynı sonucu vermeli -- diğer
+    tüm zero-shot sinyaller gibi (bkz. test_same_photo_same_labels,
+    tests/test_attributes.py)."""
+    from app.attributes import attribute_analyzer
+
+    img = jpg(Image.new("RGB", (256, 256), (90, 140, 60)))
+    d1 = attribute_analyzer.analyze(img)
+    d2 = attribute_analyzer.analyze(img)
+    assert d1["is_designed_graphic"] == d2["is_designed_graphic"]
+    assert d1["graphic_confidence"] == d2["graphic_confidence"]
+
+
+def test_tasarim_sinyali_diger_alanlari_etkilemiyor():
+    """Yeni sinyal BİLGİ AMAÇLI eklendi -- is_pet/species/breed kararlarını
+    değiştirmemeli (bkz. app/attributes.py:analyze()'in bu alanla ilgili
+    yorumu: ne is_pet/species kapısını, ne eşleştirmeyi etkiler)."""
+    from app.attributes import attribute_analyzer
+
+    d = attribute_analyzer.analyze(jpg(Image.new("RGB", (256, 256), (128, 128, 128))))
+    # Bu sabit gri görüntü için beklenen davranış zaten test_hayvan_olmayan_
+    # goruntu_yakalanir'da doğrulanıyor -- burada yalnızca yeni alanın
+    # VARLIĞININ bu kararı bozmadığını doğruluyoruz.
+    assert d["is_pet"] is False
+    assert d["species"] == "unknown"
