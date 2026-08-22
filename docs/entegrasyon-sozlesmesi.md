@@ -401,6 +401,19 @@ yazmaya gerek yok.
 4. **Bildirim tekrarı önlenmelidir.** KISIM 3 zaten yeni ilanda 5 km'deki
    herkese bildirim atıyor. Eşleşme bildirimi ayrı bir olaydır ve yalnızca
    eşleşen ilanların sahiplerine gitmelidir.
+6. **Backend tarafında eşleşme kaydı kaynağa göre TEK bir sisteme yazılır**
+   (2026-08-23 kararı): `matches[].ad_id` dolu (native↔native) satırlar
+   `ad_matches` tablosuna, `matches[].external_record_id` dolu
+   (native↔external / Instagram) satırlar `potential_matches` tablosuna
+   gider — hiçbir eşleşme iki sisteme birden yazılmaz. Bu, hem çift
+   bildirimi (aynı çiftin iki ayrı kayıt/gönderim yoluyla iki kez
+   bildirilmesi) hem çakışan dedup anahtarlarını (iki sistemin aynı çifti
+   birbirinden habersiz "yeni" sanması) önler — özellikle bir native ilanın
+   kendi analizinde bir external kaydı aday bulması ile o external kaydın
+   kendi Aşama 2 analizinde aynı native ilanı aday bulması **simetrik
+   durumlarında**, ikisi de aynı `potential_matches` girdisine düşer, ikinci
+   sisteme sızmaz. Native↔native eşleşmelerin de `potential_matches`'e tam
+   taşınması (tek sisteme indirgeme) ayrı bir PR'ın konusu.
 
 ---
 
