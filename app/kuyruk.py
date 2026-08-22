@@ -153,10 +153,9 @@ def istegi_isle(mesaj: dict) -> dict:
             # işaret ediyor (bkz. app/matcher.py'deki adaylari_eslestir).
             raise ModelHatasi(f"sorgu embedding'i geçersiz: {e}") from e
 
-        # Metin analizi YALNIZCA caption VEYA triggering_comment'ten biri
-        # anlamlı içerik taşıyorsa çalışır — ikisi de boşsa (native ilan
-        # akışı hiçbirini hiç göndermez) nlp_attributes/extracted_features
-        # eskisi gibi boş kalır, davranış hiç değişmez.
+        # Metin analizi caption/triggering_comment'ten biri anlamlı içerik
+        # taşıyorsa YA DA istek Instagram kökenliyse (external_record_id
+        # dolu) ve en az bir fotoğraf işlenebildiyse çalışır.
         #
         # DÜZELTME (Faz 2 revize): önceki sürüm yalnızca `caption` doluysa
         # çalıştırıyordu. Ama caption boş/alakasız olup triggering_comment'in
@@ -164,11 +163,25 @@ def istegi_isle(mesaj: dict) -> dict:
         # Görükle'de buldum" gibi bir yorum caption olmadan da FOUND +
         # konum çıkarımı yapılabilmeli. İki alan da ayrı birer kaynak
         # bağlamı olarak analyzer'a geçiriliyor.
+        #
+        # DÜZELTME 2 (2026-08-19, kullanıcı raporu): caption VE
+        # triggering_comment ikisi de boş/alakasız olduğunda önceki sürüm
+        # metin analizini hiç çalıştırmıyordu — ama Instagram'da kayıp/bulundu
+        # bilgisi çoğu zaman caption'da değil, doğrudan fotoğrafın (afiş/
+        # poster) İÇİNDEKİ yazıda oluyor. Salt metin analizi bunu hiç
+        # göremediği için kategori hep UNCERTAIN'a düşüyor, bu da aşağı
+        # akışta (Java MatchCandidateGatherer.oppositeCategory) aday
+        # havuzunun TAMAMEN boş kalmasına yol açıyordu — gerçek bir eşleşme
+        # sistemde dursa bile hiç aranmıyordu. Native ilan akışında
+        # external_record_id hiç dolmaz (bkz. models.py:KuyrukIstegi), o
+        # yüzden bu ek tetikleyici native davranışı DEĞİŞTİRMEZ.
         caption_var_mi = bool((istek.caption or "").strip())
         yorum_var_mi = bool((istek.triggering_comment or "").strip())
-        if caption_var_mi or yorum_var_mi:
+        photo_bytes = analiz.get("photo_bytes") or []
+        gorsel_var_mi = bool(photo_bytes) and istek.external_record_id is not None
+        if caption_var_mi or yorum_var_mi or gorsel_var_mi:
             metin_sonucu = get_text_analyzer().analyze(
-                istek.caption, istek.triggering_comment)
+                istek.caption, istek.triggering_comment, photo_bytes=photo_bytes)
             nlp_attributes = metin_sonucu.model_dump()
             extracted_features = [
                 f"{alan}:{deger}" for alan, deger in nlp_attributes.items()

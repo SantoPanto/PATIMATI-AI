@@ -255,7 +255,7 @@ def test_yalnizca_caption_varsa_metin_analizi_calisir(sahte_analiz, monkeypatch)
     cagrilar = []
 
     class _SahteAnalyzer:
-        def analyze(self, caption, triggering_comment):
+        def analyze(self, caption, triggering_comment, photo_bytes=None):
             cagrilar.append((caption, triggering_comment))
             return TextAnalysisResult(category="ADOPTION", category_confidence=0.7)
 
@@ -279,7 +279,7 @@ def test_yorum_varsa_caption_bos_olsa_da_nlp_calisir(sahte_analiz, monkeypatch):
     cagrilar = []
 
     class _SahteAnalyzer:
-        def analyze(self, caption, triggering_comment):
+        def analyze(self, caption, triggering_comment, photo_bytes=None):
             cagrilar.append((caption, triggering_comment))
             return TextAnalysisResult(
                 category="FOUND", category_confidence=0.85,
@@ -296,6 +296,75 @@ def test_yorum_varsa_caption_bos_olsa_da_nlp_calisir(sahte_analiz, monkeypatch):
     assert sonuc["nlp_attributes"]["category"] == "FOUND"
     assert sonuc["nlp_attributes"]["location_text"] == "Bursa, Görükle"
     assert sonuc["nlp_attributes"] != {}
+
+
+def test_caption_ve_yorum_bossa_ama_gorsel_varsa_external_kayitta_nlp_calisir(
+        monkeypatch):
+    """BUG DÜZELTMESİ (2026-08-19, kullanıcı raporu): kayıp/bulundu bilgisi
+    bazı Instagram gönderilerinde caption/yorumda değil, doğrudan fotoğrafın
+    (afiş/poster) içindeki yazıda geçiyor. caption VE triggering_comment
+    ikisi de boşken önceki davranış metin analizini hiç çalıştırmıyordu —
+    kategori hep UNCERTAIN'a düşüyor, bu da aşağıda Java'nın aday havuzunu
+    tamamen boş bırakmasına yol açıyordu. external_record_id dolu (Instagram
+    kökenli) ve en az bir fotoğraf işlenebildiyse artık analyzer'a görsel de
+    geçirilerek çağrılmalı."""
+    from app.models import TextAnalysisResult
+
+    def _sahte_urlleri_analiz_et(urls):
+        return {
+            "embeddings": [vektor(1)], "species": "cat",
+            "species_confidence": 0.4, "is_pet": True, "breed": None,
+            "breed_confidence": 0.0, "pattern": None, "colors": [],
+            "labels": [], "model_version": MODEL_SURUMU,
+            "photo_count": len(urls), "failed_photos": [],
+            "photo_bytes": [b"sahte-jpeg-baytlari"],
+        }
+
+    monkeypatch.setattr(kuyruk, "urlleri_analiz_et", _sahte_urlleri_analiz_et)
+
+    cagrilar = []
+
+    class _SahteAnalyzer:
+        def analyze(self, caption, triggering_comment, photo_bytes=None):
+            cagrilar.append((caption, triggering_comment, photo_bytes))
+            return TextAnalysisResult(category="LOST", category_confidence=0.8)
+
+    monkeypatch.setattr(kuyruk, "get_text_analyzer", lambda: _SahteAnalyzer())
+
+    sonuc = istegi_isle(istek(
+        ad_id=None, external_record_id=777,
+        candidates=[external_aday(external_record_id=555)],
+        caption=None, triggering_comment=None))
+
+    assert len(cagrilar) == 1, "görsel varken ve external kayıtken analyzer çağrılmadı"
+    assert cagrilar[0] == (None, None, [b"sahte-jpeg-baytlari"])
+    assert sonuc["nlp_attributes"]["category"] == "LOST"
+
+
+def test_gorsel_var_ama_native_ilansa_nlp_calismaz(monkeypatch):
+    """Aynı fotoğraf-tetikleyici native (ad_id'li) bir istekte ASLA
+    devreye girmemeli -- native akışta caption/comment zaten hiç
+    gönderilmiyor ve kullanıcı zaten ad_type'ı kendi seçiyor, metin analizi
+    burada anlamsız bir ek maliyet/gecikme olurdu."""
+    def _sahte_urlleri_analiz_et(urls):
+        return {
+            "embeddings": [vektor(1)], "species": "cat",
+            "species_confidence": 0.9, "is_pet": True, "breed": None,
+            "breed_confidence": 0.0, "pattern": None, "colors": [],
+            "labels": [], "model_version": MODEL_SURUMU,
+            "photo_count": len(urls), "failed_photos": [],
+            "photo_bytes": [b"sahte-jpeg-baytlari"],
+        }
+
+    monkeypatch.setattr(kuyruk, "urlleri_analiz_et", _sahte_urlleri_analiz_et)
+
+    def _cagrilmamasi_gereken():
+        raise AssertionError("analyzer hiç çağrılmamalıydı (native ilan)")
+
+    monkeypatch.setattr(kuyruk, "get_text_analyzer", _cagrilmamasi_gereken)
+
+    sonuc = istegi_isle(istek(caption=None, triggering_comment=None))
+    assert sonuc["nlp_attributes"] == {}
 
 
 def test_bos_dizeli_caption_ve_yorum_da_bos_sayilir(sahte_analiz, monkeypatch):
