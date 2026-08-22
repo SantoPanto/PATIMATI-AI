@@ -14,6 +14,11 @@ class AnalyzeResponse(BaseModel):
     pattern: str | None = None      # tabby | spotted | solid | bicolor
     colors: list[dict]              # Dominant renkler
     model_version: str              # Hangi model/ön işlemeyle üretildi
+    # BİLGİ AMAÇLI -- ⚠ ÖLÇÜLMEDİ (bkz. app/attributes.py:TASARIM_PROMPTS).
+    # Ne eşleştirmeyi ne de bu yanıttaki diğer alanları etkiler; ekranda
+    # gösterme/eşleştirmede kullanma kararı ayrıca, ölçümden sonra alınacak.
+    is_designed_graphic: bool = False
+    graphic_confidence: float = 0.0
 
 
 class AnalyzeUrlRequest(BaseModel):

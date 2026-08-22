@@ -148,7 +148,8 @@ def _oznitelik_cikar(img_bytes: bytes, embedding: list[float] | None) -> dict:
         logger.error(f"Öznitelik çıkarma hatası (etiketsiz devam ediliyor): {e}")
         return {"labels": [], "species": "unknown", "species_confidence": 0.0,
                 "is_pet": True, "breed": None, "breed_confidence": 0.0,
-                "pattern": None, "colors": []}
+                "pattern": None, "colors": [],
+                "is_designed_graphic": False, "graphic_confidence": 0.0}
 
 
 async def _goruntuyu_isle(img_bytes: bytes) -> tuple[list[float], dict]:
@@ -198,6 +199,8 @@ async def analyze(file: UploadFile = File(...)):
         pattern=vision["pattern"],
         colors=vision["colors"],
         model_version=MODEL_SURUMU,
+        is_designed_graphic=vision["is_designed_graphic"],
+        graphic_confidence=vision["graphic_confidence"],
     )
 
 
