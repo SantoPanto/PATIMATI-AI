@@ -266,6 +266,25 @@ def test_analyze_url_bos_liste_pydantic_tarafindan_reddedilir():
     assert r.status_code == 422
 
 
+def test_analyze_url_photo_bytes_yanita_sizmaz(monkeypatch):
+    """arkadaş incelemesi (PR #30): urlleri_analiz_et artık dönüşe
+    `photo_bytes` (ham bayt listesi, kuyruk.py'nin metin analizine görsel
+    geçirmek için kullandığı bir ara değer) ekliyor. Bu alan JSON'a
+    çevrilemez -- eski stub'lu test (yukarıdaki) bunu hiç sınamıyordu ve
+    üretimde bu uç fotoğraflı HER çağrıda 500 veriyordu."""
+    beklenen = {
+        "embeddings": [vektor(1)], "species": "cat", "species_confidence": 0.9,
+        "is_pet": True, "breed": "Tekir", "breed_confidence": 0.8,
+        "pattern": "tabby", "colors": [], "labels": ["cat"],
+        "model_version": MODEL_SURUMU, "photo_count": 1, "failed_photos": [],
+        "photo_bytes": [b"sahte-jpeg-baytlari"],
+    }
+    monkeypatch.setattr(main, "urlleri_analiz_et", lambda urls: dict(beklenen))
+    r = client.post("/analyze_url", json={"photo_urls": ["https://ornek.test/1.jpg"]})
+    assert r.status_code == 200
+    assert "photo_bytes" not in r.json()
+
+
 # --------------------------------------------------------------------------
 # OpenAPI şeması
 # --------------------------------------------------------------------------
