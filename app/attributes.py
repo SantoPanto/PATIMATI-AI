@@ -4,7 +4,7 @@
 #   - cins (37 ırk): CLIP zero-shot, tür tespitiyle daraltılmış aday listesi
 #   - desen (tabby/spotted/solid/bicolor): CLIP zero-shot
 #   - dominant renkler: piksel analizi (merkez kırpma + sabit palet)
-# Cevap biçimi Vision sürümüyle birebir aynıdır; Vision'a dönüş için app/vision.py duruyor.
+# Cevap biçimi Vision sürümüyle birebir aynıdır.
 import os
 
 import numpy as np

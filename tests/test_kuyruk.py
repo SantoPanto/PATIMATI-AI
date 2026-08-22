@@ -14,7 +14,7 @@ import json
 import numpy as np
 import pytest
 
-from app import kuyruk
+from app import kuyruk, topoloji
 from app.kuyruk import (DLQ, DLX, EXCHANGE, ISTEK_ANAHTARI, ISTEK_KUYRUGU,
                         SEMA_SURUMU, SONUC_ANAHTARI, SONUC_DLQ, SONUC_KUYRUGU,
                         istegi_isle, topolojiyi_kur)
@@ -448,10 +448,29 @@ def test_sonuc_dlq_orijinal_yonlendirme_anahtariyla_baglanir():
     assert dlq_baglari == [("bag", SONUC_DLQ, DLX, SONUC_ANAHTARI)]
 
 
-def test_sonuc_kuyrugu_dlx_e_baglidir():
+def test_sonuc_kuyrugu_varsayilan_olarak_dlx_e_baglanmaz(monkeypatch):
+    """`SONUC_KUYRUGU_DLQ_ENABLED` KAPALI kalmalı: bu kuyruk Java tarafında
+    çoktan (bu argüman olmadan) canlıda ilan edilmiş olabilir -- argümanı
+    tek taraflı eklemek PRECONDITION_FAILED'a yol açar (bkz. app/topoloji.py).
+    Java'da eşdeğer değişiklik + kuyruğun yeniden kurulmasıyla BİRLİKTE
+    açılana kadar varsayılan kapalı kalır."""
+    monkeypatch.setattr(topoloji, "SONUC_KUYRUGU_DLQ_ENABLED", False)
+    kanal = SahteKanal()
+    topolojiyi_kur(kanal)
+
+    ilan = next(o for o in kanal.olaylar
+                if o[0] == "kuyruk" and o[1] == SONUC_KUYRUGU)
+    assert ilan[2]["arguments"] is None
+    assert ilan[2]["durable"] is True
+
+
+def test_sonuc_kuyrugu_dlx_e_baglidir_flag_acikken(monkeypatch):
     """Java'daki onResult bir istisna fırlatırsa (ya da mesaj hiç
     ayrıştırılamazsa) mesaj SONUC_DLQ'ya düşsün diye -- x-dead-letter-exchange
-    yoksa aynı kuyruğa sonsuz döngüyle geri döner (zehirli mesaj)."""
+    yoksa aynı kuyruğa sonsuz döngüyle geri döner (zehirli mesaj). Bu, yalnızca
+    `SONUC_KUYRUGU_DLQ_ENABLED` açıldığında (Java tarafı hazır olduğunda)
+    devreye girer."""
+    monkeypatch.setattr(topoloji, "SONUC_KUYRUGU_DLQ_ENABLED", True)
     kanal = SahteKanal()
     topolojiyi_kur(kanal)
 
