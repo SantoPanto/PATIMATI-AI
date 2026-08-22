@@ -177,11 +177,19 @@ def istegi_isle(mesaj: dict) -> dict:
         # yüzden bu ek tetikleyici native davranışı DEĞİŞTİRMEZ.
         caption_var_mi = bool((istek.caption or "").strip())
         yorum_var_mi = bool((istek.triggering_comment or "").strip())
+        # Görsel YALNIZCA caption VE triggering_comment ikisi de boş/alakasız
+        # olduğunda gönderilir (yukarıdaki DÜZELTME 2'nin tarif ettiği durum
+        # tam olarak bu). caption zaten anlamlı içerik taşıyorsa görseli de
+        # göndermek gereksiz bir maliyet/gecikme -- metin çoktan yeterli sinyal
+        # veriyor demektir.
+        metin_yok = not caption_var_mi and not yorum_var_mi
         photo_bytes = analiz.get("photo_bytes") or []
-        gorsel_var_mi = bool(photo_bytes) and istek.external_record_id is not None
+        gorsel_var_mi = (metin_yok and bool(photo_bytes)
+                        and istek.external_record_id is not None)
         if caption_var_mi or yorum_var_mi or gorsel_var_mi:
             metin_sonucu = get_text_analyzer().analyze(
-                istek.caption, istek.triggering_comment, photo_bytes=photo_bytes)
+                istek.caption, istek.triggering_comment,
+                photo_bytes=photo_bytes if gorsel_var_mi else None)
             nlp_attributes = metin_sonucu.model_dump()
             extracted_features = [
                 f"{alan}:{deger}" for alan, deger in nlp_attributes.items()

@@ -341,6 +341,46 @@ def test_caption_ve_yorum_bossa_ama_gorsel_varsa_external_kayitta_nlp_calisir(
     assert sonuc["nlp_attributes"]["category"] == "LOST"
 
 
+def test_caption_doluysa_gorsel_analyzera_gecirilmez(monkeypatch):
+    """arkadaş incelemesi (PR #30): caption zaten anlamlı içerik taşıyorsa
+    görsel gönderilmesi GEREKSİZ maliyet/gecikme -- görsel yalnızca caption
+    VE triggering_comment ikisi de boş/alakasız olduğunda (yukarıdaki
+    DÜZELTME 2) gönderilmeli. photo_bytes ve external_record_id dolu olsa
+    bile caption doluysa analyzer'a photo_bytes=None geçirilmeli."""
+    from app.models import TextAnalysisResult
+
+    def _sahte_urlleri_analiz_et(urls):
+        return {
+            "embeddings": [vektor(1)], "species": "cat",
+            "species_confidence": 0.4, "is_pet": True, "breed": None,
+            "breed_confidence": 0.0, "pattern": None, "colors": [],
+            "labels": [], "model_version": MODEL_SURUMU,
+            "photo_count": len(urls), "failed_photos": [],
+            "photo_bytes": [b"sahte-jpeg-baytlari"],
+        }
+
+    monkeypatch.setattr(kuyruk, "urlleri_analiz_et", _sahte_urlleri_analiz_et)
+
+    cagrilar = []
+
+    class _SahteAnalyzer:
+        def analyze(self, caption, triggering_comment, photo_bytes=None):
+            cagrilar.append((caption, triggering_comment, photo_bytes))
+            return TextAnalysisResult(category="FOUND", category_confidence=0.8)
+
+    monkeypatch.setattr(kuyruk, "get_text_analyzer", lambda: _SahteAnalyzer())
+
+    sonuc = istegi_isle(istek(
+        ad_id=None, external_record_id=777,
+        candidates=[external_aday(external_record_id=555)],
+        caption="bu kediyi Görükle'de buldum", triggering_comment=None))
+
+    assert len(cagrilar) == 1
+    assert cagrilar[0] == ("bu kediyi Görükle'de buldum", None, None), (
+        "caption doluyken photo_bytes analyzer'a gecirilmemeli")
+    assert sonuc["nlp_attributes"]["category"] == "FOUND"
+
+
 def test_gorsel_var_ama_native_ilansa_nlp_calismaz(monkeypatch):
     """Aynı fotoğraf-tetikleyici native (ad_id'li) bir istekte ASLA
     devreye girmemeli -- native akışta caption/comment zaten hiç

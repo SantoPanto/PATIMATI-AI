@@ -217,7 +217,13 @@ async def analyze_url(req: AnalyzeUrlRequest):
     altında bildirir. Hiçbiri indirilemezse hata döner.
     """
     try:
-        return await run_in_threadpool(urlleri_analiz_et, req.photo_urls)
+        sonuc = await run_in_threadpool(urlleri_analiz_et, req.photo_urls)
+        # `photo_bytes` yalnızca kuyruk.py'nin (metin analizine görsel geçirmek
+        # için) kullandığı bir ara değer, sözleşmede yok ve JSON'a çevrilemez
+        # (ham bayt listesi) -- burada bırakılırsa bu uç HER fotoğraflı
+        # çağrıda 500 verir.
+        sonuc.pop("photo_bytes", None)
+        return sonuc
     except FotografIndirilemedi as e:
         # Kaynak sunucu kaynaklı: 502 (bizim değil, dış servisin sorunu)
         raise HTTPException(502, {"code": e.KOD, "message": str(e)})
