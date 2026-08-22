@@ -147,9 +147,11 @@ Java → Python.
 > hangi tarafa ait olduğunu ayırt eder.
 >
 > Metin analizi (`nlp_attributes`/`extracted_features`), `caption` VEYA
-> `triggering_comment` doluysa çalışır — ikisi de boşsa (native ilan akışı
-> hiçbirini hiç göndermez) hiç çalışmaz, alanlar boş döner (bkz. §4,
-> `app/kuyruk.py: istegi_isle()`).
+> `triggering_comment` doluysa **YA DA** istek Instagram kökenliyse
+> (`external_record_id` dolu) ve en az bir fotoğraf işlenebildiyse çalışır —
+> üçü de boşsa (native ilan akışı) hiç çalışmaz, alanlar boş döner. İkinci
+> koşul, afiş/poster fotoğraflarındaki yazıyı da okumak için var: bkz. §4,
+> `app/kuyruk.py: istegi_isle()`.
 
 **Aday alanları** (`candidates[]`):
 
@@ -237,7 +239,7 @@ Python → Java.
 | `analysis.is_pet` | `false` → fotoğrafta kedi/köpek görünmüyor (ekran görüntüsü, insan, nesne...). Java bunu `ai_is_pet` sütununa yazar ve `AdResponse` ile arayüze verir; arayüz kullanıcıdan başka bir fotoğraf isteyebilir. **Eleme ölçütü DEĞİLDİR** — aday süzme sorgusuna girmez: kapının yanlış reddetme oranı ölçüldü (111 gerçek hayvan fotoğrafında **0**), ama gerçek "hayvan olmayan fotoğraf" kümesi henüz olmadığı için yakalama oranı ölçülmedi. Ölçülmemiş bir kapıyı eleyici yapmak gerçek bir kayıp hayvan ilanını sessizce havuz dışında bırakabilir. İlan birden çok fotoğraf taşıyorsa **en az biri** hayvan içerdiğinde `true` döner. |
 | `analysis.breed` | Bilgi amaçlı. **Filtre olarak kullanılmaz** (bkz. §7). `is_pet` false ise her zaman `null`. |
 | `analysis.is_designed_graphic` / `analysis.graphic_confidence` | Görsel plain fotoğraf mı yoksa metin/logo/çerçeveli bir afiş/poster mi — Instagram ilanlarının bir kısmı hayvanın kendi fotoğrafı yerine böyle paylaşılıyor (bkz. `app/attributes.py: TASARIM_PROMPTS`). **Ölçülmedi, varsayılan olarak KAPALI/bilgi amaçlı** — ne `is_pet`/`species` kapısını ne de eşleştirmeyi (matcher.py) etkiler; yalnızca yanıtta görünür. Ekranda gösterme ya da eşleştirmede kullanma kararı gerçek verilerle ölçüldükten sonra ayrıca alınacak. |
-| `nlp_attributes` | Metin analizinin çıktısı (`app/metin_analiz.py`). `caption`/`triggering_comment`'ten biri doluysa çalışır, aksi hâlde boş (`{}`) döner. Alanlar: `category` (`LOST`\|`FOUND`\|`ADOPTION`\|`IRRELEVANT`\|`UNCERTAIN`, kaynakta hiçbir sinyal yoksa veya belirsizse **varsayılan `UNCERTAIN`**), `category_confidence`, `species`, `breed`, `colors`, `gender`, `age_text`, `pet_name`, `location_text`, `location_confidence`, `event_date`, `event_date_estimated`, `distinguishing_features`, `pet_count`, `needs_review`. Kaynak metinde olmayan bilgi **uydurulmaz** — çıkarılamayan alan `null` kalır; belirsiz veya hatalı bir sinyalde kod sessizce bir kategori UYDURMAZ, `UNCERTAIN`'a düşer. |
+| `nlp_attributes` | Metin analizinin çıktısı (`app/metin_analiz.py`). `caption`/`triggering_comment`'ten biri doluysa YA DA istek Instagram kökenliyse (§3) çalışır, aksi hâlde boş (`{}`) döner. İkinci koşulda (caption/yorum ikisi de boş) fotoğraf(lar) da sağlayıcıya (Gemini/OpenAI-uyumlu multimodal istek) gönderilir — bazı Instagram gönderilerinde kayıp/bulundu bilgisi caption/yorumda değil, doğrudan fotoğrafın (afiş/poster) içindeki yazıdadır. Alanlar: `category` (`LOST`\|`FOUND`\|`ADOPTION`\|`IRRELEVANT`\|`UNCERTAIN`, kaynakta hiçbir sinyal yoksa veya belirsizse **varsayılan `UNCERTAIN`**), `category_confidence`, `species`, `breed`, `colors`, `gender`, `age_text`, `pet_name`, `location_text`, `location_confidence`, `event_date`, `event_date_estimated`, `distinguishing_features`, `pet_count`, `needs_review`. Kaynak metinde/görselde olmayan bilgi **uydurulmaz** — çıkarılamayan alan `null` kalır; belirsiz veya hatalı bir sinyalde kod sessizce bir kategori UYDURMAZ, `UNCERTAIN`'a düşer. Sağlayıcı geçici bir hata (429/5xx/timeout) verirse en fazla üç kez backoff'lu yeniden denenir; kalıcı bir hata (400/401/403) hiç yeniden denenmez, doğrudan `UNCERTAIN`'a düşülür. |
 | `extracted_features` | `nlp_attributes` içindeki dolu alanların `"alan:değer"` biçiminde düzleştirilmiş listesi (`category`/`category_confidence`/`needs_review` hariç). `nlp_attributes` boşsa bu da boş dizi (`[]`). |
 | `matches` | Skora göre azalan sıralı, en fazla 20 kayıt. Aday yoksa boş dizi. `ad_id`/`external_record_id`'den hangisi doluysa o, adayın kimliğini taşır (§3'teki XOR kuralıyla aynı). |
 | `skipped_candidates` | Elenen adayların gerekçeli sayımı. "Hiç eşleşme çıkmadı" durumunun sebebi görünür olsun diye vardır — özellikle `model_surumu_uyusmuyor` sıfırdan büyükse ilgili ilanların yeniden analiz edilmesi gerekir. |
