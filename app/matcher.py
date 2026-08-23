@@ -207,12 +207,20 @@ def compute_final_score(
     distance_km: float | None,
     species_a: str = "unknown",
     species_b: str = "unknown",
+    threshold: float | None = None,
 ) -> dict:
     """
     Hibrit eşleşme skoru hesaplar. Her iki taraf da birden çok fotoğraf
     taşıyabilir; görsel benzerlik en iyi fotoğraf çiftinden alınır.
     Farklı türler (kedi vs köpek) için skor otomatik sıfırlanır.
+
+    `threshold`: None ise modül seviyesindeki MATCH_THRESHOLD kullanılır —
+    mevcut hiçbir çağıran için davranış değişmez. Instagram tarafı Java'dan
+    kaynak bazlı bir eşik gönderebilir (Faz 2); 0.80 hiçbir kaynak için
+    doğrulanmış "kesin" bir değer değildir, yalnızca native için kalibre
+    edildi (bkz. yukarıdaki ölçüm notu).
     """
+    esik = MATCH_THRESHOLD if threshold is None else threshold
     # Tür uyumsuzluğu — erken çıkış.
     # Cevap şekli normal yolla BİREBİR aynı olmalı: eksik anahtar Spring
     # tarafındaki DTO'yu kırıyordu (demo sırasında bulunan gerçek bir hataydı).
@@ -293,7 +301,7 @@ def compute_final_score(
         "visual": round(visual, 4),
         "label": round(label, 4),
         "location": round(location, 4),
-        "match": score >= MATCH_THRESHOLD,
+        "match": score >= esik,
         # Hangi fotoğraf çifti eşleşti — arayüzde "bu ikisi benziyor" diye
         # gösterilebilir, hata ayıklarken de hangi karenin tuttuğunu söyler.
         "photo_a": foto_a,
@@ -301,8 +309,30 @@ def compute_final_score(
     }
 
 
+def _aday_kimligi(aday_veya_id) -> tuple:
+    """Bir adayın (ya da sorgunun) kimliğini tekil bir anahtara çevirir.
+
+    Faz 2 öncesi kimlik tek başına `ad_id`'ydi. Artık bir aday/sorgu ya
+    native bir ilan (`ad_id`) ya da Instagram kökenli bir external_pet_records
+    kaydı (`external_record_id`) olabilir — ikisi asla aynı anda dolu değildir
+    (bkz. models.py). (tip, değer) çifti, iki farklı kaynaktan gelen ve
+    tesadüfen aynı sayısal id'ye sahip olabilecek kayıtların birbirine
+    KARIŞMAMASINI garanti eder — yalnızca `ad_id == ad_id` karşılaştırması
+    yapılsaydı bir external kaydın id'si 98 iken bir ad'ın id'si de 98 olduğunda
+    yanlışlıkla "aynı kayıt" sayılırdı.
+    """
+    ad_id = getattr(aday_veya_id, "ad_id", None)
+    external_record_id = getattr(aday_veya_id, "external_record_id", None)
+    if ad_id is not None:
+        return ("AD", ad_id)
+    if external_record_id is not None:
+        return ("EXTERNAL", external_record_id)
+    return (None, None)
+
+
 def adaylari_eslestir(embeddings, labels, species, candidates,
-                      ad_id=None, model_version=MODEL_SURUMU):
+                      ad_id=None, external_record_id=None,
+                      model_version=MODEL_SURUMU, threshold=None):
     """Adayları skorlar, sıralar; eleyip atladıklarını sayarak raporlar.
 
     Tek bir bozuk aday tüm isteği düşürmemeli — o yüzden hatalı aday atlanır,
@@ -312,6 +342,12 @@ def adaylari_eslestir(embeddings, labels, species, candidates,
     model_version: None verilirse sürüm denetimi yapılmaz. Varsayılan davranış
     KATIDIR — sürümü tutmayan aday atlanır, çünkü farklı sürümle üretilmiş
     vektörler kıyaslanamaz ve hata vermeden yanlış benzerlik üretir.
+
+    ad_id / external_record_id: SORGUNUN kendi kimliği — verilirse aday
+    listesindeki aynı kimlikli kayıt "kendisi" sayılıp elenir. Faz 2 öncesi
+    yalnızca `ad_id` vardı; ikisi birden verilmez (bkz. _aday_kimligi).
+
+    threshold: bkz. compute_final_score. None ise MATCH_THRESHOLD kullanılır.
 
     SORGUNUN kendi embedding'i (aday değil, `embeddings` parametresi) burada,
     döngüden ÖNCE doğrulanır. Doğrulanmazsa `compute_final_score` her aday
@@ -336,16 +372,22 @@ def adaylari_eslestir(embeddings, labels, species, candidates,
                        len(candidates), AZAMI_ADAY)
         candidates = candidates[:AZAMI_ADAY]
 
+    sorgu_kimligi = (("AD", ad_id) if ad_id is not None
+                     else ("EXTERNAL", external_record_id) if external_record_id is not None
+                     else (None, None))
+
     gorulen: set = set()
     sonuclar = []
     for aday in candidates:
-        if ad_id is not None and aday.ad_id == ad_id:
+        aday_kimligi = _aday_kimligi(aday)
+
+        if sorgu_kimligi != (None, None) and aday_kimligi == sorgu_kimligi:
             atlanan["kendisi"] += 1
             continue
-        if aday.ad_id in gorulen:
+        if aday_kimligi in gorulen:
             atlanan["tekrar_eden"] += 1
             continue
-        gorulen.add(aday.ad_id)
+        gorulen.add(aday_kimligi)
 
         if model_version is not None and aday.model_version != model_version:
             atlanan["model_surumu_uyusmuyor"] += 1
@@ -357,13 +399,18 @@ def adaylari_eslestir(embeddings, labels, species, candidates,
                 labels_a=labels, labels_b=aday.labels,
                 distance_km=aday.distance_km,
                 species_a=species, species_b=aday.species,
+                threshold=threshold,
             )
         except GecersizEmbedding as e:
-            logger.warning("Aday %s atlandı: %s", aday.ad_id, e)
+            logger.warning("Aday %s atlandı: %s", aday_kimligi, e)
             atlanan["gecersiz_embedding"] += 1
             continue
 
-        sonuclar.append({"ad_id": aday.ad_id, **sonuc})
+        sonuclar.append({
+            "ad_id": aday.ad_id,
+            "external_record_id": aday.external_record_id,
+            **sonuc,
+        })
 
     atlanan["toplam"] = sum(v for k, v in atlanan.items() if k != "toplam")
     sonuclar.sort(key=lambda x: x["score"], reverse=True)

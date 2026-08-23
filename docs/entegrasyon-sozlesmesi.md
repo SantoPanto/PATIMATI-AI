@@ -1,7 +1,9 @@
 # AI Servisi ↔ Backend Entegrasyon Sözleşmesi
 
 **Sürüm:** 1 · **Durum:** Python ayağı çalışıyor ve broker üzerinde doğrulandı;
-açık soruların 4'ü karara bağlandı (§11) · **Son güncelleme:** 2026-07-28
+açık soruların 4'ü karara bağlandı (§11) · **Son güncelleme:** 2026-08-22
+(§2 topolojisi ve §3/§4 Faz 2 + tasarım-sinyali alanları güncellendi — kod
+zaten üretiyordu, belge geride kalmıştı)
 
 > `schema_version` hâlâ **1**: verilen kararların hiçbiri mesaj biçimini
 > değiştirmedi, yalnızca kuralları netleştirdi. Java tarafı bu belgeye göre
@@ -47,10 +49,11 @@ AI çağrısı **asenkrondur**: kullanıcı ilan verirken beklemez. Fotoğraf an
 | Nesne | Ad | Tip |
 |---|---|---|
 | Exchange | `patimati.ai` | direct, durable |
-| Kuyruk (istek) | `ai.analysis.request` | durable, routing key `analysis.request` |
-| Kuyruk (sonuç) | `ai.analysis.result` | durable, routing key `analysis.result` |
+| Kuyruk (istek) | `ai.analysis.request` | durable, `x-dead-letter-exchange: patimati.ai.dlx`, routing key `analysis.request` |
+| Kuyruk (sonuç) | `ai.analysis.result` | durable, routing key `analysis.result`; `x-dead-letter-exchange: patimati.ai.dlx` **KAPALI varsayılan** (bkz. aşağıdaki uyarı) |
 | Dead-letter exchange | `patimati.ai.dlx` | direct |
-| Dead-letter kuyruğu | `ai.analysis.request.dlq` | durable |
+| Dead-letter kuyruğu (istek) | `ai.analysis.request.dlq` | durable, DLX'e `analysis.request` anahtarıyla bağlı |
+| Dead-letter kuyruğu (sonuç) | `ai.analysis.result.dlq` | durable, DLX'e `analysis.result` anahtarıyla bağlı |
 
 - **Java** → `patimati.ai` exchange'ine `analysis.request` anahtarıyla yayınlar,
   `ai.analysis.result` kuyruğunu dinler.
@@ -60,19 +63,35 @@ AI çağrısı **asenkrondur**: kullanıcı ilan verirken beklemez. Fotoğraf an
 - Sonuç mesajları **kalıcı** yayınlanır (`delivery_mode=2`). Kuyruk `durable`
   olsa bile mesaj kalıcı değilse broker yeniden başladığında sonuç kaybolur ve
   ilan sonsuza kadar `PENDING` kalır — ikisi birlikte gerekir.
+- `ai.analysis.result` için kendi ölü mektup kuyruğu (`ai.analysis.result.dlq`)
+  HER ZAMAN ilan edilir: Java tarafında sonucu işlerken (`onResult`) fırlayan
+  bir istisna ya da ayrıştırılamayan mesaj burada birikecek. Python bu kuyruğa
+  hiç yazmaz/okumaz, yalnızca topolojiyi ilan eder.
 
 > ⚠️ **İki taraf da aynı nesneleri ilan edecek — argümanlar BİREBİR aynı olmalı.**
 > Aynı kuyruğu farklı argümanlarla ilan etmek `PRECONDITION_FAILED` verir ve
-> kanalı kapatır. Özellikle `ai.analysis.request` iki tarafta da
-> `x-dead-letter-exchange: patimati.ai.dlx` argümanıyla ilan edilmelidir.
-> Spring AMQP'de bu `QueueBuilder.durable("ai.analysis.request").deadLetterExchange("patimati.ai.dlx").build()` demektir.
+> kanalı kapatır.
 >
-> Ölü mektup kuyruğu (`ai.analysis.request.dlq`), DLX'e **kuyruk adıyla değil
-> `analysis.request` anahtarıyla** bağlanır: RabbitMQ mesajı ölü mektuba
+> **`ai.analysis.result`'ın kendisine `x-dead-letter-exchange` argümanı
+> eklemek KASITLI OLARAK KAPALI** (`SONUC_KUYRUGU_DLQ_ENABLED`, varsayılan
+> `false` — bkz. `app/topoloji.py`). Sebep: bu kuyruk Java tarafında ÇOKTAN
+> (bu argüman olmadan) canlıda ilan edilmiş olabilir. RabbitMQ var olan bir
+> kuyruğun argümanlarını yerinde DEĞİŞTİRMEZ — argümanı tek taraflı açmak,
+> kuyruk broker'da bir kez silinip yeniden kurulana kadar hangi taraf önce
+> bağlanırsa `PRECONDITION_FAILED` ile kanalı kapatır. Açılış sırası:
+> 1) Java'da eşdeğer değişiklik (`QueueBuilder.durable("ai.analysis.result").deadLetterExchange("patimati.ai.dlx").build()`),
+> 2) canlı kuyruğun bir kez silinip yeniden kurulması,
+> 3) ancak o zaman iki tarafta da `SONUC_KUYRUGU_DLQ_ENABLED=true` /
+>    eşdeğerini açmak. Bu üç adım **ayrı bir PR/dağıtım** olarak ele alınmalı,
+>    bu belgedeki diğer değişikliklerle birlikte merge edilmemeli.
+>
+> Ölü mektup kuyrukları DLX'e **kuyruk adıyla değil kendi routing key'leriyle**
+> bağlanır (`ai.analysis.request.dlq` → `analysis.request`,
+> `ai.analysis.result.dlq` → `analysis.result`): RabbitMQ mesajı ölü mektuba
 > düşürürken orijinal yönlendirme anahtarını korur. Yanlış bağlanırsa mesajlar
 > hata vermeden yok olur.
 >
-> Referans uygulama Python tarafında: `app/kuyruk.py: topolojiyi_kur()`.
+> Referans uygulama Python tarafında: `app/kuyruk.py`, `app/topoloji.py: topolojiyi_kur()`.
 
 ---
 
@@ -110,17 +129,36 @@ Java → Python.
 |---|---|---|---|
 | `schema_version` | int | ✅ | Şu an `1`. Tanınmayan sürümde AI hata sonucu döner. |
 | `request_id` | string (UUID) | ✅ | İzleme ve günlükleme için. Sonuçta aynen geri döner. |
-| `ad_id` | long | ✅ | İşlenen ilanın kimliği. |
+| `ad_id` | long \| null | ⚠️ | Native PatiMati ilanı için dolu. **Tam olarak biri dolu olmalı**: `ad_id` XOR `external_record_id` (ikisi de dolu ya da ikisi de boş olamaz). |
+| `external_record_id` | long \| null | ⚠️ | Instagram kökenli `external_pet_records` kaydı için dolu (Faz 2). `ad_id` ile birlikte kullanılamaz. |
+| `source` | string | ❌ | `"PATIMATI"` (varsayılan) \| `"INSTAGRAM"`. Yalnızca izlenebilirlik içindir — AI davranışını değiştirmez; hangi tabloya yazılacağına Java, `ad_id`/`external_record_id`'den hangisinin dolu olduğuna bakarak karar verir. |
 | `ad_type` | enum | ✅ | `LOST` \| `FOUND`. **`ADOPTION` gönderilmez** (eşleştirmeye girmez). |
 | `declared_species` | string \| null | ❌ | Kullanıcının beyan ettiği tür: `cat` \| `dog` \| `null`. |
 | `photo_urls` | string[] | ✅ | En az 1 adres. AI hepsini indirir, en iyi eşleşmeyi kullanır. Üst sınır 5. |
 | `candidates` | object[] | ✅ | Boş dizi olabilir (ilk ilan). Üst sınır 100. |
+| `caption` | string \| null | ❌ | Yalnızca Instagram kökenli istekler doldurur. Metin analizini (`nlp_attributes`) tetikleyen kaynaklardan biri. |
+| `triggering_comment` | string \| null | ❌ | Eşleşmeyi tetikleyen Instagram yorumu (ör. "@patimati bu kediyi Görükle'de buldum"). `caption` boş olsa da tek başına metin analizini tetikleyebilir. |
+| `match_threshold` | float \| null | ❌ | Kaynağa özel eşik. Boşsa AI kendi ortam değişkeni varsayılanını (`MATCH_THRESHOLD`) kullanır — native davranış değişmez. |
+
+> `candidates[]` içindeki her adayda da **tam olarak biri dolu olmalı**:
+> `ad_id` (native ilan) ya da `external_record_id` (external kayıt) — aşağıdaki
+> tabloya bakın. Kural aynı, sebep de aynı: skorlama iki kimlik türünü de aynı
+> şekilde ele alır, yalnızca kendisiyle eşleşme/tekrar eden aday elemesi için
+> hangi tarafa ait olduğunu ayırt eder.
+>
+> Metin analizi (`nlp_attributes`/`extracted_features`), `caption` VEYA
+> `triggering_comment` doluysa **YA DA** istek Instagram kökenliyse
+> (`external_record_id` dolu) ve en az bir fotoğraf işlenebildiyse çalışır —
+> üçü de boşsa (native ilan akışı) hiç çalışmaz, alanlar boş döner. İkinci
+> koşul, afiş/poster fotoğraflarındaki yazıyı da okumak için var: bkz. §4,
+> `app/kuyruk.py: istegi_isle()`.
 
 **Aday alanları** (`candidates[]`):
 
 | Alan | Tip | Kaynak |
 |---|---|---|
-| `ad_id` | long | aday ilanın kimliği |
+| `ad_id` | long \| null | aday ilanın kimliği (native). `external_record_id` ile **tam olarak biri** dolu olmalı. |
+| `external_record_id` | long \| null | aday external kaydın kimliği (Instagram, Faz 2). `ad_id` ile **tam olarak biri** dolu olmalı. |
 | `embeddings` | float[768][] | ⚠️ **Liste — ilanın her fotoğrafı için bir vektör.** Görsel skor tüm fotoğraf çiftlerinin **en iyisinden** alınır. Tek fotoğrafla eşleşme oranı gerçek veride %24'te kaldığı için çoklu fotoğraf zorunludur (bkz. `docs/olcum-raporu.md` §4). En az 1, en fazla 5. |
 | `labels` | string[] | adayın `ai_labels` sütunu |
 | `species` | string | adayın `ai_species` sütunu |
@@ -160,13 +198,16 @@ Python → Java.
     "breed_confidence": 0.88,
     "pattern": "tabby",
     "colors": [{ "name": "brown", "score": 0.41 }],
-    "labels": ["cat", "tabby", "brown", "white"]
+    "labels": ["cat", "tabby", "brown", "white"],
+    "is_designed_graphic": false,
+    "graphic_confidence": 0.94
   },
   "nlp_attributes": {},
   "extracted_features": [],
   "matches": [
     {
       "ad_id": 98,
+      "external_record_id": null,
       "score": 0.81,
       "visual": 0.79,
       "label": 0.66,
@@ -197,9 +238,10 @@ Python → Java.
 | `analysis.species` | `cat` \| `dog` \| `unknown`. Güveni düşükse `unknown` döner. |
 | `analysis.is_pet` | `false` → fotoğrafta kedi/köpek görünmüyor (ekran görüntüsü, insan, nesne...). Java bunu `ai_is_pet` sütununa yazar ve `AdResponse` ile arayüze verir; arayüz kullanıcıdan başka bir fotoğraf isteyebilir. **Eleme ölçütü DEĞİLDİR** — aday süzme sorgusuna girmez: kapının yanlış reddetme oranı ölçüldü (111 gerçek hayvan fotoğrafında **0**), ama gerçek "hayvan olmayan fotoğraf" kümesi henüz olmadığı için yakalama oranı ölçülmedi. Ölçülmemiş bir kapıyı eleyici yapmak gerçek bir kayıp hayvan ilanını sessizce havuz dışında bırakabilir. İlan birden çok fotoğraf taşıyorsa **en az biri** hayvan içerdiğinde `true` döner. |
 | `analysis.breed` | Bilgi amaçlı. **Filtre olarak kullanılmaz** (bkz. §7). `is_pet` false ise her zaman `null`. |
-| `nlp_attributes` | NLP çıkarımları için yer tutucu nesne. Şimdilik boş (`{}`) döner; NLP modülü entegre edildiğinde niyet/tasma durumu gibi anahtarlar buraya yazılır. |
-| `extracted_features` | NLP tarafından çıkarılan özelliklerin listesi. Şimdilik boş dizi (`[]`) döner; entegrasyon sonrası metinden türetilen etiketler burada taşınır. |
-| `matches` | Skora göre azalan sıralı, en fazla 20 kayıt. Aday yoksa boş dizi. |
+| `analysis.is_designed_graphic` / `analysis.graphic_confidence` | Görsel plain fotoğraf mı yoksa metin/logo/çerçeveli bir afiş/poster mi — Instagram ilanlarının bir kısmı hayvanın kendi fotoğrafı yerine böyle paylaşılıyor (bkz. `app/attributes.py: TASARIM_PROMPTS`). **Ölçülmedi, varsayılan olarak KAPALI/bilgi amaçlı** — ne `is_pet`/`species` kapısını ne de eşleştirmeyi (matcher.py) etkiler; yalnızca yanıtta görünür. Ekranda gösterme ya da eşleştirmede kullanma kararı gerçek verilerle ölçüldükten sonra ayrıca alınacak. |
+| `nlp_attributes` | Metin analizinin çıktısı (`app/metin_analiz.py`). `caption`/`triggering_comment`'ten biri doluysa YA DA istek Instagram kökenliyse (§3) çalışır, aksi hâlde boş (`{}`) döner. İkinci koşulda (caption/yorum ikisi de boş) fotoğraf(lar) da sağlayıcıya (Gemini/OpenAI-uyumlu multimodal istek) gönderilir — bazı Instagram gönderilerinde kayıp/bulundu bilgisi caption/yorumda değil, doğrudan fotoğrafın (afiş/poster) içindeki yazıdadır. Alanlar: `category` (`LOST`\|`FOUND`\|`ADOPTION`\|`IRRELEVANT`\|`UNCERTAIN`, kaynakta hiçbir sinyal yoksa veya belirsizse **varsayılan `UNCERTAIN`**), `category_confidence`, `species`, `breed`, `colors`, `gender`, `age_text`, `pet_name`, `location_text`, `location_confidence`, `event_date`, `event_date_estimated`, `distinguishing_features`, `pet_count`, `needs_review`. Kaynak metinde/görselde olmayan bilgi **uydurulmaz** — çıkarılamayan alan `null` kalır; belirsiz veya hatalı bir sinyalde kod sessizce bir kategori UYDURMAZ, `UNCERTAIN`'a düşer. Sağlayıcı geçici bir hata (429/5xx/timeout) verirse en fazla üç kez backoff'lu yeniden denenir; kalıcı bir hata (400/401/403) hiç yeniden denenmez, doğrudan `UNCERTAIN`'a düşülür. |
+| `extracted_features` | `nlp_attributes` içindeki dolu alanların `"alan:değer"` biçiminde düzleştirilmiş listesi (`category`/`category_confidence`/`needs_review` hariç). `nlp_attributes` boşsa bu da boş dizi (`[]`). |
+| `matches` | Skora göre azalan sıralı, en fazla 20 kayıt. Aday yoksa boş dizi. `ad_id`/`external_record_id`'den hangisi doluysa o, adayın kimliğini taşır (§3'teki XOR kuralıyla aynı). |
 | `skipped_candidates` | Elenen adayların gerekçeli sayımı. "Hiç eşleşme çıkmadı" durumunun sebebi görünür olsun diye vardır — özellikle `model_surumu_uyusmuyor` sıfırdan büyükse ilgili ilanların yeniden analiz edilmesi gerekir. |
 | `matches[].match` | `score >= eşik` ise `true`. Eşik AI tarafında ortam değişkeniyle ayarlanır. |
 | `match_threshold` | **Bu koşumda kullanılan eşiğin kendisi.** `matches[].match` bunun sonucudur ve eşik zamanla değişir (0.70 → 0.80, ölçüm sonucu). Java bunu `ad_match.threshold_at_time` sütununa yazar: kayıt "bu eşleşme üretilirken eşik neydi" sorusuna sonradan doğru cevap verebilsin diye. Değer `MATCH_THRESHOLD`'dan gelir; **yukarıdaki örnekteki sayı yalnızca gösterimdir**, tek kaynak koddur. |

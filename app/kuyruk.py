@@ -37,7 +37,7 @@ from pydantic import ValidationError
 # çalışmaya devam etsin — çağıranın hangi dosyada durduğunu bilmesi gerekmez.
 from .topoloji import (AMQP_URL, DLQ, DLX, EXCHANGE, ISTEK_ANAHTARI,  # noqa: F401
                        ISTEK_KUYRUGU, KALP_ATISI, PREFETCH, SEMA_SURUMU,
-                       SONUC_ANAHTARI, SONUC_KUYRUGU, topolojiyi_kur)
+                       SONUC_ANAHTARI, SONUC_DLQ, SONUC_KUYRUGU, topolojiyi_kur)
 
 # DİKKAT: `.topoloji` yukarıda load_dotenv() çağırıyor ve bu satırın ÜSTÜNDE
 # durması şart — `.surum` modülü ortam değişkenlerini içe aktarma anında
@@ -47,6 +47,7 @@ from .analiz import urlleri_analiz_et
 from .hatalar import (AIHatasi, DesteklenmeyenSema, GecersizEmbedding,
                       GecersizIstek, ModelHatasi)
 from .matcher import MATCH_THRESHOLD, adaylari_eslestir
+from .metin_analiz import get_text_analyzer
 from .models import KuyrukIstegi
 from .surum import MODEL_SURUMU
 
@@ -59,12 +60,20 @@ def _simdi() -> str:
         "+00:00", "Z")
 
 
-def _hata_sonucu(request_id, ad_id, kod: str, mesaj: str) -> dict:
-    """Sözleşme §4 'Hatalı' biçimi. Java bunu görünce ai_status = FAILED yazar."""
+def _hata_sonucu(request_id, ad_id, kod: str, mesaj: str,
+                 external_record_id=None) -> dict:
+    """Sözleşme §4 'Hatalı' biçimi. Java bunu görünce ai_status = FAILED yazar.
+
+    `external_record_id` de taşınır (Faz 2): hata external_pet_records'a
+    aitse Java hangi kaydı FAILED işaretleyeceğini bilmeli — yalnızca ad_id
+    dönseydi Instagram kökenli bir istek başarısız olduğunda bu bilgi
+    sessizce kaybolurdu.
+    """
     return {
         "schema_version": SEMA_SURUMU,
         "request_id": request_id,
         "ad_id": ad_id,
+        "external_record_id": external_record_id,
         "status": "error",
         "error": {"code": kod, "message": mesaj},
         "processed_at": _simdi(),
@@ -81,9 +90,10 @@ def istegi_isle(mesaj: dict) -> dict:
     """
     # request_id ve ad_id'yi doğrulamadan ÖNCE okuyoruz: mesaj şemaya uymasa
     # bile Java'nın hangi ilana ait olduğunu bilmesi gerekiyor, yoksa o ilan
-    # sonsuza kadar PENDING'de kalır.
+    # sonsuza kadar PENDING'de kalır. external_record_id de aynı sebeple.
     request_id = mesaj.get("request_id")
     ad_id = mesaj.get("ad_id")
+    external_record_id = mesaj.get("external_record_id")
 
     try:
         # Şema sürümü önce: tanımadığımız bir sürümü alan alan ayrıştırmaya
@@ -106,6 +116,7 @@ def istegi_isle(mesaj: dict) -> dict:
             raise GecersizIstek(f"mesaj sözleşmeye uymuyor -> {ozet}") from e
 
         request_id, ad_id = istek.request_id, istek.ad_id
+        external_record_id = istek.external_record_id
 
         try:
             analiz = urlleri_analiz_et(istek.photo_urls)
@@ -131,6 +142,8 @@ def istegi_isle(mesaj: dict) -> dict:
                 species=tur,
                 candidates=istek.candidates,
                 ad_id=istek.ad_id,
+                external_record_id=istek.external_record_id,
+                threshold=istek.match_threshold,
             )
         except GecersizEmbedding as e:
             # Burada patlayan embedding Java'dan gelmiyor, bir satır yukarıdaki
@@ -139,6 +152,53 @@ def istegi_isle(mesaj: dict) -> dict:
             # patladı" diye AI servisinin içinde arardı; MODEL_ERROR doğru yere
             # işaret ediyor (bkz. app/matcher.py'deki adaylari_eslestir).
             raise ModelHatasi(f"sorgu embedding'i geçersiz: {e}") from e
+
+        # Metin analizi caption/triggering_comment'ten biri anlamlı içerik
+        # taşıyorsa YA DA istek Instagram kökenliyse (external_record_id
+        # dolu) ve en az bir fotoğraf işlenebildiyse çalışır.
+        #
+        # DÜZELTME (Faz 2 revize): önceki sürüm yalnızca `caption` doluysa
+        # çalıştırıyordu. Ama caption boş/alakasız olup triggering_comment'in
+        # tek başına anlamlı olduğu durumlar gerçek — "@patimati bu kediyi
+        # Görükle'de buldum" gibi bir yorum caption olmadan da FOUND +
+        # konum çıkarımı yapılabilmeli. İki alan da ayrı birer kaynak
+        # bağlamı olarak analyzer'a geçiriliyor.
+        #
+        # DÜZELTME 2 (2026-08-19, kullanıcı raporu): caption VE
+        # triggering_comment ikisi de boş/alakasız olduğunda önceki sürüm
+        # metin analizini hiç çalıştırmıyordu — ama Instagram'da kayıp/bulundu
+        # bilgisi çoğu zaman caption'da değil, doğrudan fotoğrafın (afiş/
+        # poster) İÇİNDEKİ yazıda oluyor. Salt metin analizi bunu hiç
+        # göremediği için kategori hep UNCERTAIN'a düşüyor, bu da aşağı
+        # akışta (Java MatchCandidateGatherer.oppositeCategory) aday
+        # havuzunun TAMAMEN boş kalmasına yol açıyordu — gerçek bir eşleşme
+        # sistemde dursa bile hiç aranmıyordu. Native ilan akışında
+        # external_record_id hiç dolmaz (bkz. models.py:KuyrukIstegi), o
+        # yüzden bu ek tetikleyici native davranışı DEĞİŞTİRMEZ.
+        caption_var_mi = bool((istek.caption or "").strip())
+        yorum_var_mi = bool((istek.triggering_comment or "").strip())
+        # Görsel YALNIZCA caption VE triggering_comment ikisi de boş/alakasız
+        # olduğunda gönderilir (yukarıdaki DÜZELTME 2'nin tarif ettiği durum
+        # tam olarak bu). caption zaten anlamlı içerik taşıyorsa görseli de
+        # göndermek gereksiz bir maliyet/gecikme -- metin çoktan yeterli sinyal
+        # veriyor demektir.
+        metin_yok = not caption_var_mi and not yorum_var_mi
+        photo_bytes = analiz.get("photo_bytes") or []
+        gorsel_var_mi = (metin_yok and bool(photo_bytes)
+                        and istek.external_record_id is not None)
+        if caption_var_mi or yorum_var_mi or gorsel_var_mi:
+            metin_sonucu = get_text_analyzer().analyze(
+                istek.caption, istek.triggering_comment,
+                photo_bytes=photo_bytes if gorsel_var_mi else None)
+            nlp_attributes = metin_sonucu.model_dump()
+            extracted_features = [
+                f"{alan}:{deger}" for alan, deger in nlp_attributes.items()
+                if deger not in (None, "", [], False) and alan not in
+                ("category", "category_confidence", "needs_review")
+            ]
+        else:
+            nlp_attributes = {}
+            extracted_features = []
 
         # `analysis` bloğu sözleşmede sabit bir alan kümesi. urlleri_analiz_et
         # bunlara ek olarak photo_count/failed_photos/model_version döndürüyor;
@@ -149,6 +209,8 @@ def istegi_isle(mesaj: dict) -> dict:
             "schema_version": SEMA_SURUMU,
             "request_id": istek.request_id,
             "ad_id": istek.ad_id,
+            "external_record_id": istek.external_record_id,
+            "source": istek.source,
             "status": "ok",
             "model_version": MODEL_SURUMU,
             "analysis": {
@@ -162,11 +224,8 @@ def istegi_isle(mesaj: dict) -> dict:
                 "colors": analiz["colors"],
                 "labels": analiz["labels"],
             },
-            # TODO (NLP Entegrasyonu): PatiMatiTextExtractor modülü ana projeye dâhil
-            # edildiğinde, kullanıcının ilan açıklaması analiz edilecek
-            # ve dönen nitelikler (niyet, tasma durumu vb.) aşağıdaki alanlara bağlanacaktır.
-            "nlp_attributes": {},
-            "extracted_features": [],
+            "nlp_attributes": nlp_attributes,
+            "extracted_features": extracted_features,
             "matches": matches,
             # Sözleşmede yok ama eklemek kırıcı değil (§9). `match` bayrağı
             # "score >= eşik" demektir ve eşik ZAMANLA DEĞİŞİYOR (0.70 → 0.80,
@@ -185,12 +244,13 @@ def istegi_isle(mesaj: dict) -> dict:
         }
 
     except AIHatasi as e:
-        logger.warning("İstek hatayla sonuçlandı (ad_id=%s, kod=%s): %s",
-                       ad_id, e.KOD, e)
-        return _hata_sonucu(request_id, ad_id, e.KOD, str(e))
+        logger.warning("İstek hatayla sonuçlandı (ad_id=%s, external_record_id=%s, kod=%s): %s",
+                       ad_id, external_record_id, e.KOD, e)
+        return _hata_sonucu(request_id, ad_id, e.KOD, str(e), external_record_id)
     except Exception as e:
-        logger.exception("Beklenmeyen hata (ad_id=%s)", ad_id)
-        return _hata_sonucu(request_id, ad_id, "INTERNAL", str(e))
+        logger.exception("Beklenmeyen hata (ad_id=%s, external_record_id=%s)",
+                         ad_id, external_record_id)
+        return _hata_sonucu(request_id, ad_id, "INTERNAL", str(e), external_record_id)
 
 
 def sonucu_yayinla(kanal, sonuc: dict) -> None:
@@ -232,8 +292,34 @@ def _mesaj_geldi(kanal, method, ozellikler, govde: bytes) -> None:
     # yazılmamış olur — ilan sessizce PENDING'de kalır ve kimse fark etmez.
     # Bu sırayla, çökme hâlinde mesaj yeniden teslim edilir; yeniden işlemek
     # zararsızdır çünkü AI tarafı saftır (§8).
-    sonucu_yayinla(kanal, sonuc)
-    kanal.basic_ack(method.delivery_tag)
+    try:
+        sonucu_yayinla(kanal, sonuc)
+        kanal.basic_ack(method.delivery_tag)
+    except pika.exceptions.AMQPError:
+        # Bağlantı/kanal düzeyinde bir sorun -- kanal muhtemelen zaten
+        # kullanılamaz durumda, burada nack DENEMİYORUZ (kendisi de aynı
+        # sebeple patlar). dinle()'nin dış AMQPError yakalayıcısı zaten
+        # bunun için var: yeniden bağlanır. RabbitMQ, bağlantısı kopan bir
+        # tüketicinin onaylanmamış mesajlarını KENDİLİĞİNDEN yeniden
+        # kuyruğa koyar -- burada elle bir şey yapmamıza gerek yok.
+        raise
+    except Exception as e:
+        # AMQPError DIŞINDA bir istisna (ör. `sonuc` içinde JSON'a
+        # çevrilemeyen bir değer -- TypeError) daha önce hiçbir yerde
+        # yakalanmıyordu: dinle()'nin dış except'i yalnızca
+        # pika.exceptions.AMQPError'ı yakalıyor, böyle bir istisna süreci
+        # doğrudan çökertiyordu. Mesaj hiç ack'lenmediği için yeniden
+        # teslim edilip AYNI istisnayı tekrar fırlatır, süreç sonsuz
+        # döngüde tekrar tekrar çökerdi (zehirli mesaj). §8'deki
+        # "ayrıştırılamayan mesaj" deseniyle TUTARLI: nack(requeue=False)
+        # ile DLQ'ya gönderiyoruz, süreç ayakta kalıyor.
+        logger.exception(
+            "Sonuç yayınlanamadı/onaylanamadı, mesaj DLQ'ya gönderildi: "
+            "ad_id=%s external_record_id=%s",
+            sonuc.get("ad_id"), sonuc.get("external_record_id"),
+        )
+        kanal.basic_nack(method.delivery_tag, requeue=False)
+        return
 
     logger.info("ad_id=%s durum=%s eşleşme=%d süre=%.1fsn",
                 sonuc.get("ad_id"), sonuc.get("status"),

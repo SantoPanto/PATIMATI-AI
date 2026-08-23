@@ -24,7 +24,7 @@ def baytlari_analiz_et(fotograflar: list[bytes],
     bozuksa hata fırlatılır — o zaman analiz edilecek bir şey kalmamıştır.
     """
     basarisizlar = list(basarisizlar or [])
-    embeddings, oznitelikler = [], []
+    embeddings, oznitelikler, basarili_baytlar = [], [], []
 
     for i, ham in enumerate(fotograflar):
         try:
@@ -34,6 +34,7 @@ def baytlari_analiz_et(fotograflar: list[bytes],
             basarisizlar.append({"index": i, "error": str(e)})
             continue
         embeddings.append(emb)
+        basarili_baytlar.append(ham)
         try:
             # Kimlik vektörü YALNIZCA kimlik modeli CLIP'in kendisiyse etiket
             # analizine geçirilir: o zaman ikisi aynı uzaydadır ve CLIP'i aynı
@@ -58,6 +59,12 @@ def baytlari_analiz_et(fotograflar: list[bytes],
     birincil = _birincil_sec(oznitelikler)
     return {
         "embeddings": embeddings,
+        # Metin analizinin (app/metin_analiz.py) görsel-dahil çağırabilmesi
+        # için ham baytlar da taşınıyor -- yalnızca başarıyla işlenen
+        # fotoğrafların baytları (basarisizlar'daki bozuk dosyalar hariç).
+        # Sözleşmedeki `analysis` bloğunda YOK, yalnızca kuyruk.py'nin
+        # kendi içinde kullanıp attığı bir ara değer (bkz. app/kuyruk.py).
+        "photo_bytes": basarili_baytlar,
         "species": birincil["species"],
         "species_confidence": birincil["species_confidence"],
         # İlanda tek bir hayvan fotoğrafı bile varsa hayvan var sayılır;

@@ -8,7 +8,7 @@ on:
   push:
     branches: [ "main" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "feature/instagram-intelligence" ]
 
 # Aynı dala yeni bir itme gelirse eskisini iptal et: aşağıdaki imaj işi ~10
 # dakika sürüyor ve üst üste binen koşumlar runner kuyruğunu tıkar.

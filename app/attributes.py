@@ -4,7 +4,7 @@
 #   - cins (37 ırk): CLIP zero-shot, tür tespitiyle daraltılmış aday listesi
 #   - desen (tabby/spotted/solid/bicolor): CLIP zero-shot
 #   - dominant renkler: piksel analizi (merkez kırpma + sabit palet)
-# Cevap biçimi Vision sürümüyle birebir aynıdır; Vision'a dönüş için app/vision.py duruyor.
+# Cevap biçimi Vision sürümüyle birebir aynıdır.
 import os
 
 import numpy as np
@@ -82,6 +82,21 @@ BREEDS: list[tuple[str, str]] = [
 # CLIP makalesinin Oxford-IIIT Pet için kullandığı şablon
 BREED_PROMPT = "a photo of a {}, a type of pet."
 
+# "Tasarım mı, düz fotoğraf mı?" sinyali (BİLGİ AMAÇLI, bkz. AttributeAnalyzer.
+# analyze()'in bu alanla ilgili notu). CLIP zero-shot ikili sınıflandırma --
+# is_pet kapısıyla (yukarıdaki CELDIRICI_PROMPTS) AYNI yöntem, farklı soru:
+# o "hayvan var mı" sorar, bu "bu görsel düz bir fotoğraf mı yoksa
+# tasarlanmış bir poster/afiş mi" sorar. Instagram'dan gelen kayıp/bulundu
+# ilanlarının bir kısmı, hayvanın kendi fotoğrafı yerine üzerine yazı/logo/
+# çerçeve eklenmiş bir afiş olarak paylaşılıyor (bkz. app/metin_analiz.py'nin
+# 2026-08-19'da eklenen poster-okuma notu) -- bu ikisini ayırt etmek, kimlik
+# eşleştirmesinin (embedder.py/matcher.py) tasarım öğelerini de hayvanın bir
+# parçasıymış gibi gömmesinin önüne geçmenin ilk adımı.
+TASARIM_PROMPTS = {
+    "fotograf": "a plain, unedited photograph",
+    "tasarim": "a designed poster, flyer, or graphic image with text, borders, or a logo overlay",
+}
+
 PATTERN_PROMPTS = {
     "tabby":   "a photo of an animal with tabby striped fur",
     "spotted": "a photo of an animal with spotted fur",
@@ -143,7 +158,7 @@ SOFT_PROMPTS = {
       "collar": {
           "keys": ["collar", "no_collar", "unknown", "unknown2", "unknown_fur"],
           "prompts": [
-              "a photo of a pet wearing a distinct, brightly colored collar or harness around its neck",
+              "a photo of a pet wearing a collar or harness around its neck",
               "a photo of a pet's bare neck with no collar",
               "a photo of an animal's face only, no neck visible",
               "a photo of an unrecognizable object",
@@ -225,6 +240,8 @@ class AttributeAnalyzer:
             list(SPECIES_PROMPTS.values()) + CELDIRICI_PROMPTS)
         self._pattern_keys = list(PATTERN_PROMPTS)
         self._pattern_feats = embedder.embed_text(list(PATTERN_PROMPTS.values()))
+        self._tasarim_keys = list(TASARIM_PROMPTS)
+        self._tasarim_feats = embedder.embed_text(list(TASARIM_PROMPTS.values()))
 
         self._breed_keys = [name for name, _ in BREEDS]
         self._breed_feats = embedder.embed_text(
@@ -260,6 +277,9 @@ class AttributeAnalyzer:
         pattern, _ = self._classify(img_feat, self._pattern_feats, self._pattern_keys)
         breed, breed_conf = self.predict_breed(img_feat, species)
         colors = self._dominant_colors(image_bytes)
+        tasarim_val, tasarim_conf = self._classify(
+            img_feat, self._tasarim_feats, self._tasarim_keys)
+        is_designed_graphic = tasarim_val == "tasarim"
 
         labels = []
         
@@ -295,6 +315,15 @@ class AttributeAnalyzer:
             "pattern": pattern,
             "colors": [{"r": c["r"], "g": c["g"], "b": c["b"], "score": c["score"]}
                        for c in colors],
+            # BİLGİ AMAÇLI -- ⚠ ÖLÇÜLMEDİ (gerçek poster/afiş test kümesi
+            # yok, bkz. TASARIM_PROMPTS'un yorumu). Ne is_pet/species
+            # kapısını, ne tür/kimlik eşleştirmesini (matcher.py) etkiler;
+            # şu an yalnızca API yanıtında görünür. Ekranda gösterme ya da
+            # eşleştirmede kullanma (ör. kırpma zorunlu kılma) kararı, bu
+            # alanın doğruluğu gerçek verilerle ölçüldükten SONRA ayrıca
+            # alınacak.
+            "is_designed_graphic": is_designed_graphic,
+            "graphic_confidence": round(tasarim_conf, 4),
         }
 
     def predict_species(self, img_feat) -> tuple[str, float, bool]:

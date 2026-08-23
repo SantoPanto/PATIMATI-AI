@@ -61,7 +61,8 @@ def vektor(seed=0):
 def sahte_oznitelik(**degisiklikler):
     d = {"labels": ["cat", "tabby"], "species": "cat", "species_confidence": 0.95,
          "is_pet": True, "breed": "Tekir", "breed_confidence": 0.81,
-         "pattern": "tabby", "colors": [{"r": 100, "g": 80, "b": 60, "score": 0.4}]}
+         "pattern": "tabby", "colors": [{"r": 100, "g": 80, "b": 60, "score": 0.4}],
+         "is_designed_graphic": False, "graphic_confidence": 0.02}
     d.update(degisiklikler)
     return d
 
@@ -186,6 +187,32 @@ def test_match_kendisi_elenir():
     assert body["skipped_candidates"]["kendisi"] == 1
 
 
+def test_match_ad_id_ve_external_record_id_ikisi_birden_reddedilir():
+    """models.py: MatchRequest._en_fazla_bir_kimlik. Düzeltme öncesi ikisi de
+    dolu gelebiliyordu ve matcher.py._aday_kimligi ad_id'yi sessizce
+    önceliklendiriyordu (external_record_id sorgusu yanlış kimlikle
+    eşleştiriliyordu) -- artık 422 ile açıkça reddedilir."""
+    r = client.post("/match", json={
+        "embeddings": [vektor(0)], "labels": ["cat"], "species": "cat",
+        "ad_id": 5, "external_record_id": 7,
+        "candidates": [],
+    })
+    assert r.status_code == 422
+
+
+def test_match_ikisi_de_bos_hala_gecerli():
+    """MatchCandidate/KuyrukIstegi'nin aksine MatchRequest'te "hiçbiri"
+    hâlâ geçerli bir durum -- self-exclusion o zaman devre dışı kalır (bkz.
+    models.py._en_fazla_bir_kimlik docstring'i). Bu davranışı bilerek
+    KORUYORUZ; test_match_bos_aday_listesiyle_bos_sonuc_doner ile aynı
+    girdi şeklini kapsıyor, burada ayrıca 'kırılmadı' diye adı geçiyor."""
+    r = client.post("/match", json={
+        "embeddings": [vektor(0)], "labels": ["cat"], "species": "cat",
+        "candidates": [],
+    })
+    assert r.status_code == 200
+
+
 def test_match_bozuk_sorgu_embeddingi_400_doner():
     """Sorgunun kendi embedding'i bozuksa 'aday elendi' gibi yutulmamalı, açık
     400 dönmeli (bkz. app/matcher.py: adaylari_eslestir)."""
@@ -237,6 +264,25 @@ def test_analyze_url_basarili_analiz_sonucu_doner(monkeypatch):
 def test_analyze_url_bos_liste_pydantic_tarafindan_reddedilir():
     r = client.post("/analyze_url", json={"photo_urls": []})
     assert r.status_code == 422
+
+
+def test_analyze_url_photo_bytes_yanita_sizmaz(monkeypatch):
+    """arkadaş incelemesi (PR #30): urlleri_analiz_et artık dönüşe
+    `photo_bytes` (ham bayt listesi, kuyruk.py'nin metin analizine görsel
+    geçirmek için kullandığı bir ara değer) ekliyor. Bu alan JSON'a
+    çevrilemez -- eski stub'lu test (yukarıdaki) bunu hiç sınamıyordu ve
+    üretimde bu uç fotoğraflı HER çağrıda 500 veriyordu."""
+    beklenen = {
+        "embeddings": [vektor(1)], "species": "cat", "species_confidence": 0.9,
+        "is_pet": True, "breed": "Tekir", "breed_confidence": 0.8,
+        "pattern": "tabby", "colors": [], "labels": ["cat"],
+        "model_version": MODEL_SURUMU, "photo_count": 1, "failed_photos": [],
+        "photo_bytes": [b"sahte-jpeg-baytlari"],
+    }
+    monkeypatch.setattr(main, "urlleri_analiz_et", lambda urls: dict(beklenen))
+    r = client.post("/analyze_url", json={"photo_urls": ["https://ornek.test/1.jpg"]})
+    assert r.status_code == 200
+    assert "photo_bytes" not in r.json()
 
 
 # --------------------------------------------------------------------------

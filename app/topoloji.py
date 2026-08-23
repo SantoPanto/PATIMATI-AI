@@ -23,8 +23,28 @@ DLX = "patimati.ai.dlx"
 ISTEK_KUYRUGU = "ai.analysis.request"
 SONUC_KUYRUGU = "ai.analysis.result"
 DLQ = "ai.analysis.request.dlq"
+# Sonuç kuyruğunun kendi ölü mektup kuyruğu: Java tarafında onResult bir
+# istisna fırlatırsa ya da mesaj hiç ayrıştırılamazsa DÜŞECEĞİ yer. İstek
+# tarafının DLQ'suyla BİLEREK BİRLEŞTİRİLMEDİ -- her kuyruğun kendi DLQ'su
+# var, aynı DLX'i (tek exchange) paylaşıyorlar. Bu taraf (Python) bu kuyruğa
+# hiç mesaj YAZMIYOR/OKUMUYOR -- yalnızca topolojiyi ilan ediyor. Bunun
+# gerçekten işe yaraması için `SONUC_KUYRUGU`'nun kendisinin de
+# x-dead-letter-exchange argümanıyla ilan edilmesi gerekir -- bkz.
+# `SONUC_KUYRUGU_DLQ_ENABLED` (aşağıda), bu KAPALI kaldığı sürece
+# `ai.analysis.result` bu DLQ'ya hiç düşürmez.
+SONUC_DLQ = "ai.analysis.result.dlq"
 ISTEK_ANAHTARI = "analysis.request"
 SONUC_ANAHTARI = "analysis.result"
+
+# `SONUC_KUYRUGU` (ai.analysis.result) Java tarafında ÇOKTAN, bu argüman
+# OLMADAN ilan edilmiş olabilir. RabbitMQ var olan bir kuyruğun argümanlarını
+# yerinde değiştirmez -- iki taraf FARKLI argümanlarla ilan ederse kanal
+# PRECONDITION_FAILED (406) ile kapanır (bkz. topolojiyi_kur() docstring'i).
+# Bu yüzden kapalı varsayılan: Java'da eşdeğer değişiklik yapılıp kuyruk
+# canlıda bir kez silinip yeniden kurulana kadar bu argüman EKLENMEZ.
+# İkisi birlikte hazır olunca: SONUC_KUYRUGU_DLQ_ENABLED=true.
+SONUC_KUYRUGU_DLQ_ENABLED = os.getenv(
+    "SONUC_KUYRUGU_DLQ_ENABLED", "false").lower() == "true"
 
 SEMA_SURUMU = 1
 
@@ -58,6 +78,12 @@ def topolojiyi_kur(kanal) -> None:
     tarafı (Spring AMQP) da aynı kuyrukları ilan edeceği için argümanlar iki
     tarafta birebir aynı olmalı — özellikle `x-dead-letter-exchange`.
     Entegrasyonda en sık düşülen tuzaklardan biridir.
+
+    `SONUC_KUYRUGU` (ai.analysis.result) için bu argüman `SONUC_KUYRUGU_DLQ_ENABLED`
+    ile KAPALI başlar: kuyruk Java tarafında çoktan (bu argüman olmadan)
+    ilan edilmiş olabilir ve bunu tek taraflı açmak canlıda PRECONDITION_FAILED'a
+    yol açar. Java'da eşdeğer değişiklik + kuyruğun bir kez yeniden kurulmasıyla
+    BİRLİKTE açılmalı.
     """
     kanal.exchange_declare(EXCHANGE, exchange_type="direct", durable=True)
     kanal.exchange_declare(DLX, exchange_type="direct", durable=True)
@@ -74,5 +100,13 @@ def topolojiyi_kur(kanal) -> None:
                         arguments={"x-dead-letter-exchange": DLX})
     kanal.queue_bind(ISTEK_KUYRUGU, EXCHANGE, routing_key=ISTEK_ANAHTARI)
 
-    kanal.queue_declare(SONUC_KUYRUGU, durable=True)
+    # Sonuç kuyruğunun kendi DLQ'su -- aynı gerekçe, kuyruk adıyla değil
+    # `analysis.result` anahtarıyla bağlanıyor (RabbitMQ ölü mektuba
+    # düşürürken orijinal yönlendirme anahtarını korur).
+    kanal.queue_declare(SONUC_DLQ, durable=True)
+    kanal.queue_bind(SONUC_DLQ, DLX, routing_key=SONUC_ANAHTARI)
+
+    sonuc_kuyrugu_args = ({"x-dead-letter-exchange": DLX}
+                          if SONUC_KUYRUGU_DLQ_ENABLED else None)
+    kanal.queue_declare(SONUC_KUYRUGU, durable=True, arguments=sonuc_kuyrugu_args)
     kanal.queue_bind(SONUC_KUYRUGU, EXCHANGE, routing_key=SONUC_ANAHTARI)
