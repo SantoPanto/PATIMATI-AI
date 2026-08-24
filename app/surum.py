@@ -50,11 +50,14 @@ KIMLIK_MODELLERI = {
     # 1) Ağırlıklar ~1.4 GB ve depoda değil. KIMLIK_MODEL_YOLU ile yerel bir
     #    klasör gösterilebilir; yoksa HuggingFace'ten iner. Dockerfile bunu
     #    BUILD sırasında indirir ki çalışma zamanında ağ bağımlılığı kalmasın.
-    # 2) LİSANSI BELİRTİLMEMİŞ ve site 19.08.2026'dan beri halka açık
-    #    (https://patimati.me). Varsayılan yapılırken bu BİLEREK kabul edildi:
-    #    ölçülen doğruluk farkı seçildi, lisans riski açık borç olarak duruyor.
-    #    Ticari kullanım gündeme gelirse "google-siglip2" (Apache 2.0) hazır
-    #    yedek — tek yapılacak KIMLIK_MODEL değerini değiştirmek + yeniden analiz.
+    # 2) LİSANS: Apache 2.0 — 22.08.2026'da model yazarı (Kirill Borodin,
+    #    MTUCI) e-postayla doğruladı ve depoya açıkça işlendi; ticari
+    #    kullanım serbest. (19-22.08 arası lisans belirsizdi ve bilinçli
+    #    risk olarak taşınıyordu; google-siglip2'ye dönme yedek planı
+    #    geçersizleşti.) ⚠ Depo aynı gün güncellendi (yükleme düzeltmesi):
+    #    bir SONRAKİ imaj build'i YENİ ağırlıkları indirir — build öncesi
+    #    aynı fotoyla eski/yeni embedding karşılaştırılmalı; değerler
+    #    değiştiyse toplu yeniden analiz gerekir (zaten açık iş).
     # 3) CI bu modelle KOŞMUYOR (ağırlık 1,4 GB). CI'ın yeşili kodun
     #    sağlamlığını gösterir, bu modelin doğruluğunu değil.
     "siglip2-animal": {
@@ -66,8 +69,9 @@ KIMLIK_MODELLERI = {
         "surum": "siglip2-animal/v2",
         "boyut": 768,
     },
-    # Lisansı temiz yedek (Apache 2.0). Ölçümde EER 0.091 — kazananın iki katı
-    # hata, ama ticari kullanım gerekirse sorunsuz.
+    # Yedek model (Apache 2.0). Ölçümde EER 0.091 — kazananın iki katı hata.
+    # 22.08.2026'ya kadar "lisansı temiz tek seçenek" olduğu için duruyordu;
+    # artık varsayılanın lisansı da temiz, bu yalnız teknik alternatif.
     "google-siglip2": {
         "kimlik": "google/siglip2-base-patch16-224",
         "islemci": None,
