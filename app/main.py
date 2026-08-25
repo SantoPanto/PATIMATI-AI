@@ -15,8 +15,10 @@ from .analiz import urlleri_analiz_et
 from .attributes import attribute_analyzer
 from .embedder import PetEmbedder, embedder, kimlik_gomucu
 from .hatalar import AIHatasi, FotografIndirilemedi, GecersizGoruntu
+from .instagram_caption import instagram_caption_olustur
 from .matcher import MATCH_THRESHOLD, adaylari_eslestir, compute_final_score
-from .models import AnalyzeResponse, AnalyzeUrlRequest, MatchRequest
+from .models import (AnalyzeResponse, AnalyzeUrlRequest, InstagramCaptionRequest,
+                     InstagramCaptionResponse, MatchRequest)
 from .surum import MODEL_SURUMU, SECILEN_KIMLIK, VEKTOR_BOYUTU
 
 logging.basicConfig(level=logging.INFO)
@@ -309,6 +311,29 @@ async def match(req: MatchRequest):
 
     return {"matches": matches, "skipped_candidates": atlanan,
             "model_version": MODEL_SURUMU}
+
+
+@app.post("/generate_instagram_caption", response_model=InstagramCaptionResponse,
+          dependencies=[Depends(anahtari_dogrula)])
+async def generate_instagram_caption(req: InstagramCaptionRequest):
+    """
+    Bir ilanın (kayıp/bulundu/sahiplendirme) bilgilerinden tek bir Instagram
+    gönderi metni (caption) üretir -- bkz. app/instagram_caption.py,
+    app/instagram_caption_prompt.py.
+
+    Görsel GEREKMEZ -- yalnızca Java tarafının Ad entity'sinden doldurduğu
+    metin alanları kullanılır. Sağlayıcı yapılandırılmamışsa ya da çağrı
+    başarısız olursa `caption=None` döner (asla hata fırlatmaz, bkz.
+    instagram_caption_olustur) -- çağıran (Java) bu durumda kendi şablon
+    caption'ına düşer.
+    """
+    caption = await run_in_threadpool(
+        instagram_caption_olustur,
+        ilan_turu=req.ilan_turu, tur=req.tur, irk=req.irk,
+        renkler=req.renkler, il_ilce=req.il_ilce, aciklama=req.aciklama,
+        ayirt_edici=req.ayirt_edici,
+    )
+    return InstagramCaptionResponse(caption=caption)
 
 
 if __name__ == "__main__":
