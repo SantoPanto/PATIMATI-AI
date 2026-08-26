@@ -32,7 +32,7 @@ ZAMAN_ASIMI = float(os.getenv("PHOTO_TIMEOUT", "10"))                   # saniye
 AZAMI_FOTOGRAF = int(os.getenv("PHOTO_MAX_COUNT", "5"))
 
 # TEK GÜVEN MEKANİZMASI: bu listede AÇIKÇA yazan adres güvenilir sayılır.
-#   üretim : PHOTO_ALLOWED_HOSTS=patimati-media.s3.eu-central-1.amazonaws.com
+#   üretim : PHOTO_ALLOWED_HOSTS=media.patimati.me
 #   lokal  : PHOTO_ALLOWED_HOSTS=127.0.0.1,localhost,minio
 #
 # Neden tek mekanizma: önce "özel ağa izin ver" diye ayrı bir bayrak vardı ve
@@ -91,6 +91,9 @@ def dogrula(url: str) -> None:
 
     acik_izinli = _acikca_izinli(p.hostname)
 
+    if not acik_izinli:
+        logger.debug("Host '%s' beyaz listede bulunamadı. İzinli hostlar: %s", p.hostname, IZINLI_HOSTLAR)
+
     # https her zaman; http yalnızca açıkça izin verilmiş adresler için
     # (lokal MinIO gibi). Böylece şifresiz trafik de dar kapsamda kalıyor.
     if p.scheme == "http":
@@ -116,7 +119,7 @@ def dogrula(url: str) -> None:
         raise FotografIndirilemedi(
             "PHOTO_ALLOWED_HOSTS boş — hiçbir adres indirilemez. "
             ".env dosyasına indirilmesine izin verilen alan adlarını yazın "
-            "(yerel deneme için 127.0.0.1, üretimde S3 alan adınız).")
+            "(yerel deneme için 127.0.0.1, üretimde media.patimati.me).")
 
     if not acik_izinli:
         raise FotografIndirilemedi(f"Alan adı beyaz listede değil: {p.hostname}")

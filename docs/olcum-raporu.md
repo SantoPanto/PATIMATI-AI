@@ -1,6 +1,6 @@
 # Ölçüm Raporu — AI Eşleştirme Servisi
 
-**Tarih:** 2026-07-26 · **Model sürümü:** `clip-vit-base-patch32/v1`
+**Tarih:** 2026-07-26 · **Güncel ürün modeli:** `siglip2-animal/v2`
 
 Bu belge, servisin doğruluğuna dair yapılan tüm ölçümleri ve bu ölçümlerin
 tasarımı nasıl değiştirdiğini kaydeder. Buradaki her sayı çalıştırılabilir bir
@@ -12,6 +12,7 @@ betikten gelir; hiçbiri tahmin değildir.
 | `scripts/measure_threshold.py` | Eşik taraması (sentetik "aynı birey" simülasyonu) |
 | `scripts/gercek_veri_olcum.py` | **Gerçek dünya fotoğraflarıyla eşik ve hayvan kapısı doğrulaması** |
 | `scripts/teshis_arkaplan.py` | **Skor hayvandan mı arka plandan mı geliyor?** (tam / kırpılmış / hayvansız, AUC ile) |
+| `scripts/eslesme_yok_testi.py` | **Açık Küme (Open-Set) yanlış alarm ve eşik taraması** |
 
 > **Veri notu:** Gerçek dünya fotoğrafları (`tests/gercek_veri/`) KVKK gereği
 > repoya dâhil edilmez — sokak ve iç mekân kareleri uzaktan da olsa insan
@@ -193,7 +194,52 @@ bireyler içeren bir kümeyle verilecek (`wildlife-datasets` → `CatIndividualI
 **Bu yüzden `MatchCandidate.embeddings` bir listedir ve sözleşme ilan başına
 birden çok fotoğraf zorunlu kılar.**
 
----
+### 4.1. Açık Küme Eşik Taraması (Gerçek Motor ve "Data Leakage" Önlemi)
+
+**Amaç:** Açık küme TPR/FPR analizini yapay varsayımlardan arındırarak, üretimdeki
+`siglip2-animal` kimlik modeli ve canlı eşleştirme motoru
+`app.matcher.compute_final_score` ile kör (blind) olarak ölçmek.
+
+**Metodoloji:**
+* Testte "Data Leakage" (Veri sızıntısı) engellenir. Motor, fotoğrafların aynı
+  hayvana ait olup olmadığını (ground truth) bilmez.
+* Her fotoğrafın etiketleri ve türü, ham fotoğraf baytları `attribute_analyzer`
+  servisine verilerek üretilir. Kimlik modelinin 768 boyutlu vektörü etiketçiye
+  verilmez; etiketçi üretimdeki gibi kendi CLIP vektörünü kullanır.
+* `CatIndividualImages` doğrulanmış konum verisi taşımadığından, konum katmanını
+  denetimli tutmak için her karşılaştırmada 5.0 km kullanılır. Bu yalnızca konum
+  bileşenini kontrol eder; etiket ve tür girdileri fotoğrafa özeldir.
+
+**Bulgular:** Önceki tablodaki sayılar `google-siglip2` ve sabit etiketlerle
+üretilmişti. Modelin skor dağılımı/EER'i ve dinamik etiketlerin katkısı değiştiği
+için bu sayılar `siglip2-animal` için geçerli değildir. Eski sayılar geçersizdi, aşağıdaki tablo sızıntı kapatıldıktan sonraki yeni koşumdan elde edilmiştir.
+
+| Ürün eşiği | Ham Görsel Skor (TPR) | Hibrit Skor - app.matcher (TPR) |
+|---|---|---|
+| **0.80  (`MATCH_THRESHOLD`)** | %96.9 (FPR: %85.9) | %94.9 (FPR: %57.7) |
+
+**Sonuç ve kritik çıkarım:**
+
+1. Ürünün bildirim eşiği `MATCH_THRESHOLD = 0.80`'dir. Önceki taslaktan kalan
+   eşik değeri artık bu raporda ürün eşiği olarak kullanılmaz.
+2. Eski sabit-etiket sonuçlarıyla 0.80 için duyarlılık, yanlış alarm veya hibrit
+   skor tavanı hakkında çıkarım yapılamaz.
+3. Betik, üretimdeki güncel `siglip2-animal` kimlik modeli ve dinamik `attribute_analyzer` etiketleriyle yeniden çalıştırılmış olup, elde edilen taze sonuçlar (FPR: %57.7, TPR: %94.9) tabloya işlenmiştir.
+
+### Eşik Kararının Gerekçesi (Tam Tarama Tablosu)
+Artık eşik karara bağlandığına göre, bu kararın gerekçesini oluşturan tam tarama verileri aşağıdadır:
+
+| Eşik | Yanlış alarm (FPR) | Yakalama (TPR) |
+| :--- | :--- | :--- |
+| 0.65 | %80,5 | %96,9 |
+| 0.70 | %57,7 | %94,9 |
+| **0.80** | **%13,4** | **%68,4** |
+| 0.85 | %3,4 | %40,8 |
+
+### Ölçüm Metodolojisi ve Kısıtlar
+
+1. **FPR Ölçüm Kriteri (Galeri Maksimumu):** Testler sırasında negatifler galeri maksimumu olarak puanlanmıştır. Bu kurgu, ürünün çalışma mantığıyla (adayın tamamına bakılması) örtüşmektedir. Rapordaki FPR değeri basit bir "iki fotoğraf karşılaştırmasındaki yanılma oranı" değil; "bir sorgunun, 50 kimlikli bir galeride en az bir yanlış eşleşme üretme oranıdır". Gerçek üründe galeri boyutu büyüdükçe bu oranın da matematiksel olarak artma potansiyeli bulunmaktadır.
+2. **Konum Sabiti:** Kullanılan `CatIndividualImages` veri setinde konum verisi bulunmadığı için (başka bir seçenek olmadığından), mesafe her karşılaştırmada sabit **5,0 km** kabul edilmiştir (`location_score(5.0) = 0.50` ve ağırlığı `0.15`). Bu durum her skora eşit olarak sabit **+0.075** eklemektedir. Değer her iki tarafa da eşit eklendiği için eşikler arası kıyası bozmamakta, ancak rapordaki mutlak TPR/FPR sayılarının bu sabite bağlı olduğu unutulmamalıdır.
 
 ## 5. Bulguların tasarıma etkisi
 
@@ -374,3 +420,81 @@ Halka açık köpek kümelerinin hepsi kırpık; **tam sahne köpek verisi yok**
 hiçbir küme gerçek kayıp/bulundu çifti değil — yani "kayıp fotoğrafı evde, bulundu
 fotoğrafı sokakta" senaryosu ölçülmedi. Bunun tek çözümü gerçek "sahibine kavuştu"
 ilanlarından çift toplamak.
+
+---
+
+## 8. Kırpma yeteneği + tasarım/afiş sinyali (2026-08-22)
+
+İki kullanıcı şikayetinin araştırılması sırasında eklendi: (1) farklı açıdan
+çekilmiş fotoğraflar eşleşmiyor, (2) poster/afiş görselleri hiç eşleşmiyor.
+İkisi de bu raporun §4/§7'sindeki "arka plan, ayrımın büyük bölümünü taşıyor"
+bulgusuyla aynı kökten geliyor — kırpma bunu düzeltme adayı olarak §4'te
+"yeniden açıldı" denip kapanmamıştı.
+
+**Eklenen, CANLI DAVRANIŞI DEĞİŞTİRMEYEN iki şey:**
+
+1. **`app/kirpma.py`** — torchvision'ın hazır COCO dedektörüyle (ek indirme/
+   lisans riski yok, ~74 MB, torch/torchvision zaten bağımlılık) kedi/köpek
+   bölgesine kırpma yeteneği. `CROP_TO_ANIMAL` env bayrağıyla açılır,
+   **varsayılan KAPALI**. Hayvan bulunamazsa (ölçümde 7 fotoğrafın 2'sinde
+   olduğu gibi) ya da kırpılan bölge çok küçük çıkarsa tam görüntüye geri
+   döner. `app/embedder.py:goruntu_ac`'a min-boyut kontrolünden SONRA
+   eklendi.
+
+   ⚠ **Açılması ayrı bir karar** — `KIMLIK_MODEL` gibi embedding'in üretilme
+   biçimini değiştirir, `MODEL_SURUMU` artışı ve mevcut ilanların yeniden
+   analizini gerektirir (bkz. app/surum.py, .env.example). Bu, backend #121
+   canlıya alınıp toplu yeniden-analiz çalıştırılana kadar zaten mümkün
+   değil.
+
+   **`scripts/kirpma_karar_olcumu.py`** eklendi: §4/§7'nin "adil değil, sadece
+   tuzağı gösteriyor" dediği stüdyo/sokak konfondu OLMADAN (çok bireyli, tek
+   kaynaktan veri), gerçek üretim kırpma fonksiyonuyla (`app/kirpma.py`) TAM
+   vs HAYVAN AUC'sini kıyaslar. Mantığı sentetik veriyle sınandı (`tests/
+   test_kirpma_karar_olcumu_betik_mantigi.py`).
+
+   ### 8.1. Sonuç — MPDD ile GERÇEK ölçüm (2026-08-22)
+
+   CatIndividualImages ile denenmedi (Kaggle kimlik doğrulaması bu ortamda
+   yok). Bunun yerine **MPDD** (Mendeley, "Multi-pose dog dataset", 191 köpek/
+   1657 foto, CC BY 4.0, `https://data.mendeley.com/datasets/v5j6m8dzhv/1` —
+   Kaggle GEREKTİRMEZ) indirilip `<birey>/<foto>` düzenine dönüştürüldü
+   (`data/MPDD_bireyler/`, depoda değil — data/ gitignore'da).
+
+   | Örneklem | TAM (bugünkü) görsel AUC | HAYVAN (kırpılmış) görsel AUC | Fark |
+   |---|---|---|---|
+   | 40 birey × 3 foto | 0.899 | 0.902 | +0.003 |
+   | 80 birey × 3 foto | 0.907 | 0.899 | **−0.008** |
+
+   **Sonuç: TUTARSIZ.** Yön, örneklem büyüklüğüyle DEĞİŞİYOR — iki ölçüm de
+   ±0.01 içinde, yani fark gürültü seviyesinde. Bu raporun kendi karar kuralı
+   (§7: *"bir model/değişiklik, ancak birden çok koşulda tutarlı kazanıyorsa
+   seçilir"*) burada net bir HAYIR üretiyor: **kırpma bu ölçümde CLIP kimlik
+   modeliyle görünür/güvenilir bir kazanç sağlamıyor.**
+
+   ⚠ **Sınırlamalar:**
+   - Ölçüm üretim kimlik modeliyle (`siglip2-animal`/`avito-siglip2`) DEĞİL,
+     `KIMLIK_MODEL=clip` ile yapıldı — bu ortamda `sentencepiece` paketi kurulu
+     değil ve avito-siglip2 ağırlığı (~1,4 GB) cache'de yok. §7'nin arka plan
+     ablasyonu, modellerin arka plana bağımlılığının ÇOK FARKLI olduğunu
+     gösteriyor (CLIP'e en yakın `avito-clip` arka plandan 37,5 puan
+     etkileniyor, `avito-siglip2` 41,4 puan) — yani bu sonuç CLIP'e özgü
+     olabilir, **üretim modeliyle yeniden ölçülmeden genellenemez.**
+   - Yalnızca MPDD (köpek) ölçüldü, kedi verisiyle (CatIndividualImages)
+     tekrarlanmadı — karar kuralının "birden çok koşul" şartı tam
+     karşılanmıyor.
+
+   **Karar önerisi: `CROP_TO_ANIMAL` şimdilik AÇILMAMALI.** Gelecekte
+   yeniden değerlendirmek için: `pip install sentencepiece` + üretim
+   ağırlığını indirip aynı betiği (`KIMLIK_MODEL` ayarlamadan, varsayılanı
+   kullanarak) MPDD ve mümkünse CatIndividualImages'la tekrarlayın.
+
+2. **`app/attributes.py`: `is_designed_graphic`/`graphic_confidence`** —
+   mevcut zero-shot kapı mimarisiyle (is_pet kapısıyla aynı yöntem) "bu görsel
+   düz bir fotoğraf mı, tasarlanmış bir poster/afiş mi" sinyali. **BİLGİ
+   AMAÇLI** — is_pet/species/tür eşleştirmesini etkilemez, yalnızca
+   `AnalyzeResponse`'a eklendi. ⚠ ÖLÇÜLMEDİ: gerçek poster/afiş test kümesi
+   yok (§6'nın "oyuncak/çizim hiç denenmedi" boşluğuyla aynı kategori).
+   Ekranda gösterme ya da eşleştirmede kullanma (ör. tespit edilirse zorunlu
+   kırpma) kararı, alanın doğruluğu gerçek verilerle ölçüldükten SONRA
+   ayrıca alınacak.

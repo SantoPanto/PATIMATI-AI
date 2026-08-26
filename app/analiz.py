@@ -24,7 +24,7 @@ def baytlari_analiz_et(fotograflar: list[bytes],
     bozuksa hata fırlatılır — o zaman analiz edilecek bir şey kalmamıştır.
     """
     basarisizlar = list(basarisizlar or [])
-    embeddings, oznitelikler = [], []
+    embeddings, oznitelikler, basarili_baytlar = [], [], []
 
     for i, ham in enumerate(fotograflar):
         try:
@@ -34,12 +34,16 @@ def baytlari_analiz_et(fotograflar: list[bytes],
             basarisizlar.append({"index": i, "error": str(e)})
             continue
         embeddings.append(emb)
+        basarili_baytlar.append(ham)
         try:
-            # Kimlik vektörü etiket analizine GEÇİRİLMEZ. Kimlik modeli CLIP'ten
-            # farklıysa vektör başka bir uzayda olur ve zero-shot metin
-            # karşılaştırması anlamsız sonuç verir — sessizce yanlış etiket üretir.
-            # attribute_analyzer kendi CLIP vektörünü hesaplasın.
-            oznitelikler.append(attribute_analyzer.analyze(ham))
+            # Kimlik vektörü YALNIZCA kimlik modeli CLIP'in kendisiyse etiket
+            # analizine geçirilir: o zaman ikisi aynı uzaydadır ve CLIP'i aynı
+            # fotoğraf için ikinci kez çalıştırmak anlamsız olur. Kimlik modeli
+            # farklıysa (ör. SigLIP2) vektör başka bir uzayda olur ve zero-shot
+            # metin karşılaştırması anlamsız sonuç verir — bu durumda
+            # attribute_analyzer kendi CLIP vektörünü hesaplar (embedding=None).
+            onceden_hesaplanan = emb if kimlik_gomucu.clip_mi else None
+            oznitelikler.append(attribute_analyzer.analyze(ham, embedding=onceden_hesaplanan))
         except Exception as e:
             # Öznitelik hatası embedding'i çöpe atmamalı: eşleştirme etiketsiz
             # de çalışır, sadece skorun etiket bileşeni sıfırlanır.
@@ -55,6 +59,12 @@ def baytlari_analiz_et(fotograflar: list[bytes],
     birincil = _birincil_sec(oznitelikler)
     return {
         "embeddings": embeddings,
+        # Metin analizinin (app/metin_analiz.py) görsel-dahil çağırabilmesi
+        # için ham baytlar da taşınıyor -- yalnızca başarıyla işlenen
+        # fotoğrafların baytları (basarisizlar'daki bozuk dosyalar hariç).
+        # Sözleşmedeki `analysis` bloğunda YOK, yalnızca kuyruk.py'nin
+        # kendi içinde kullanıp attığı bir ara değer (bkz. app/kuyruk.py).
+        "photo_bytes": basarili_baytlar,
         "species": birincil["species"],
         "species_confidence": birincil["species_confidence"],
         # İlanda tek bir hayvan fotoğrafı bile varsa hayvan var sayılır;
@@ -78,10 +88,28 @@ def _birincil_sec(oznitelikler: list[dict]) -> dict:
     alanı dönüyor. En NET fotoğrafı seçiyoruz: hayvan görünen fotoğraflar
     arasından tür güveni en yüksek olanı. Uzaktan çekilmiş bulanık kareye
     bakıp "unknown" demek yerine, kullanıcının koyduğu net kareyi kullanır.
+
+    SIRALAMA ÖLÇÜTÜ İKİ BASAMAKLI (20.08.2026'da düzeltildi): önce "türü
+    atanabildi mi", sonra tür güveni. Tek başına `species_confidence`
+    yanlış ölçüttü — o sayı "fotoğrafta hayvan var mı" sorusunu HİÇ ölçmez,
+    yalnız "hayvansa kedi mi köpek mi" sorusunu ölçer ve iki seçenek
+    üzerinden hesaplandığı için hayvansız bir karede bile %83'e çıkabiliyor.
+
+    Ölçüldü: gerçek kedi karesi (güven 0.8177) + hayvansız kare (güven
+    0.8293) aynı ilana konduğunda BİRİNCİL hayvansız kare seçiliyordu ⇒
+    ilanın türü `cat` yerine `unknown` oluyor, etiketleri/deseni de o
+    kareden geliyordu. `is_pet` filtresi bunu yakalayamıyor çünkü hayvan
+    kapısı o karede zaten yanlış pozitif vermişti (26 hayvansız fotoğrafta
+    7 kez).
+
+    Türü atanmış bir fotoğraf, tanım gereği hayvan kanıtı eşiği geçmiş
+    fotoğraftır (bkz. attributes.py SPECIES_GATE_MIN) — yani bu basamak
+    yeni bir sinyal uydurmuyor, var olan kararı yeniden kullanıyor.
     """
     hayvanlilar = [o for o in oznitelikler if o["is_pet"]]
     aday = hayvanlilar or oznitelikler
-    return max(aday, key=lambda o: o["species_confidence"])
+    return max(aday, key=lambda o: (o["species"] != "unknown",
+                                    o["species_confidence"]))
 
 
 def urlleri_analiz_et(photo_urls: list[str]) -> dict:

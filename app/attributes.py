@@ -4,7 +4,7 @@
 #   - cins (37 ırk): CLIP zero-shot, tür tespitiyle daraltılmış aday listesi
 #   - desen (tabby/spotted/solid/bicolor): CLIP zero-shot
 #   - dominant renkler: piksel analizi (merkez kırpma + sabit palet)
-# Cevap biçimi Vision sürümüyle birebir aynıdır; Vision'a dönüş için app/vision.py duruyor.
+# Cevap biçimi Vision sürümüyle birebir aynıdır.
 import os
 
 import numpy as np
@@ -82,6 +82,21 @@ BREEDS: list[tuple[str, str]] = [
 # CLIP makalesinin Oxford-IIIT Pet için kullandığı şablon
 BREED_PROMPT = "a photo of a {}, a type of pet."
 
+# "Tasarım mı, düz fotoğraf mı?" sinyali (BİLGİ AMAÇLI, bkz. AttributeAnalyzer.
+# analyze()'in bu alanla ilgili notu). CLIP zero-shot ikili sınıflandırma --
+# is_pet kapısıyla (yukarıdaki CELDIRICI_PROMPTS) AYNI yöntem, farklı soru:
+# o "hayvan var mı" sorar, bu "bu görsel düz bir fotoğraf mı yoksa
+# tasarlanmış bir poster/afiş mi" sorar. Instagram'dan gelen kayıp/bulundu
+# ilanlarının bir kısmı, hayvanın kendi fotoğrafı yerine üzerine yazı/logo/
+# çerçeve eklenmiş bir afiş olarak paylaşılıyor (bkz. app/metin_analiz.py'nin
+# 2026-08-19'da eklenen poster-okuma notu) -- bu ikisini ayırt etmek, kimlik
+# eşleştirmesinin (embedder.py/matcher.py) tasarım öğelerini de hayvanın bir
+# parçasıymış gibi gömmesinin önüne geçmenin ilk adımı.
+TASARIM_PROMPTS = {
+    "fotograf": "a plain, unedited photograph",
+    "tasarim": "a designed poster, flyer, or graphic image with text, borders, or a logo overlay",
+}
+
 PATTERN_PROMPTS = {
     "tabby":   "a photo of an animal with tabby striped fur",
     "spotted": "a photo of an animal with spotted fur",
@@ -123,20 +138,33 @@ HARD_PROMPTS = {
             "a photo of a large sized pet",
             "a photo where the pet size cannot be determined"
         ]
+    },
+    "eye_color": {
+        "keys": ["brown", "blue", "green", "amber", "hazel", "heterochromia", "unknown"],
+        "prompts": [
+            "a photo of a pet with brown eyes",
+            "a photo of a pet with blue eyes",
+            "a photo of a pet with green eyes",
+            "a photo of a pet with amber or yellowish eyes",
+            "a photo of a pet with hazel eyes",
+            "a photo of a pet with odd eyes, heterochromia, one blue and one brown eye",
+            "a photo where the pet's eye color is not visible"
+        ]
     }
 }
 
 # 2. SOFT (Geçici) Özellikler (Bonus veren, ceza vermeyen)
 SOFT_PROMPTS = {
-    "collar": {
-        "keys": ["collar", "no_collar", "unknown", "unknown2"],
-        "prompts": [
-            "a photo of a pet wearing a collar around its neck",
-            "a photo of a pet with no collar",
-            "a photo of an animal's face only, no neck visible",
-            "a photo of an unrecognizable object"
-        ]
-    },
+      "collar": {
+          "keys": ["collar", "no_collar", "unknown", "unknown2", "unknown_fur"],
+          "prompts": [
+              "a photo of a pet wearing a collar or harness around its neck",
+              "a photo of a pet's bare neck with no collar",
+              "a photo of an animal's face only, no neck visible",
+              "a photo of an unrecognizable object",
+              "a photo of a pet with thick natural fur or shadows around its neck, but no collar"
+          ]
+      },
     "ear_tag": {
         "keys": ["tag", "no_tag", "unknown", "unknown2"],
         "prompts": [
@@ -172,6 +200,30 @@ class AttributeAnalyzer:
     # gerçek yakalama oranı henüz ölçülmedi. Bu yüzden temkinli (düşük) seçildi:
     # şüpheli bir fotoğrafı geçirmek, gerçek bir ilanı reddetmekten iyidir.
     PET_GATE_MIN = float(os.getenv("PET_GATE_MIN", "0.10"))
+
+    # TÜR ATAMA kapısı — `PET_GATE_MIN`'den AYRI ve çok daha yüksek.
+    #
+    # Neden iki ayrı eşik: iki kararın bedeli aynı değil.
+    #   is_pet    yanlış olursa kimse elenmiyor (sözleşme §4: eleme ölçütü
+    #             DEĞİL), o yüzden bilerek temkinli/düşük tutuluyor.
+    #   species   yanlış olursa GERÇEKTEN eliyor: matcher.py tür uyuşmazlığında
+    #             adayı `species_mismatch` ile bloke ediyor. Yani hayvansız bir
+    #             fotoğrafa "dog" demek, kayıp bir kediyi eşleşme listesinden
+    #             düşürüyor.
+    #
+    # Ölçüm (26 etiketli hayvansız fotoğraf + 81 gerçek hayvan fotoğrafı, CLIP):
+    #   hayvansız kümede tür atanan 3 foto -> hayvan_toplam 0.115 · 0.208 · 0.322
+    #   gerçek hayvanlarda tür atanan 78 foto -> EN DÜŞÜK hayvan_toplam 0.761
+    # İki küme arasında 2,4 katlık bir boşluk var; 0.5 ortasına düşüyor.
+    # Bu eşikte hayvansız kümedeki 3 yanlış atamanın ÜÇÜ de siliniyor ve
+    # gerçek hayvanlardaki 78 atamanın HİÇBİRİ kaybolmuyor (0.40–0.70 aralığının
+    # tamamında kayıp 0). Yeniden ölçmek için: scripts/hayvansiz_olcum.py
+    #
+    # ⚠ Kapının kendisi hâlâ CLIP'in "hayvan var mı" skoruna güveniyor; bu
+    # skorun hayvansız fotoğraflardaki yanlış pozitif oranı %27 (7/26) ve o
+    # SORUN OLARAK DURUYOR — burada kapatılan şey, o yanlış pozitifin türe
+    # (dolayısıyla eşleştirmeye) sızması.
+    SPECIES_GATE_MIN = float(os.getenv("SPECIES_GATE_MIN", "0.50"))
     # Cins güveni bunun altındaysa isim döndürülmez (yanlış cins göstermektense boş bırak).
     # 0.70 ölçümle seçildi (scripts/measure_breed.py, 111 fotoğraf):
     #   eşik 0.00 → fotoğrafların %100'üne cins verilir, verilenlerin %78'i doğru
@@ -188,6 +240,8 @@ class AttributeAnalyzer:
             list(SPECIES_PROMPTS.values()) + CELDIRICI_PROMPTS)
         self._pattern_keys = list(PATTERN_PROMPTS)
         self._pattern_feats = embedder.embed_text(list(PATTERN_PROMPTS.values()))
+        self._tasarim_keys = list(TASARIM_PROMPTS)
+        self._tasarim_feats = embedder.embed_text(list(TASARIM_PROMPTS.values()))
 
         self._breed_keys = [name for name, _ in BREEDS]
         self._breed_feats = embedder.embed_text(
@@ -223,6 +277,9 @@ class AttributeAnalyzer:
         pattern, _ = self._classify(img_feat, self._pattern_feats, self._pattern_keys)
         breed, breed_conf = self.predict_breed(img_feat, species)
         colors = self._dominant_colors(image_bytes)
+        tasarim_val, tasarim_conf = self._classify(
+            img_feat, self._tasarim_feats, self._tasarim_keys)
+        is_designed_graphic = tasarim_val == "tasarim"
 
         labels = []
         
@@ -245,7 +302,7 @@ class AttributeAnalyzer:
         # Bonus Özellikler (Tasma, Küpe)
         for cat, data in self._soft_features.items():
             val, _ = self._classify(img_feat, data["feats"], data["keys"])
-            if "unknown" not in val and not val.startswith("no_"):
+            if "unknown" not in val:
                 labels.append(f"bonus:{cat}_{val}")
         return {
             "labels": labels,
@@ -258,6 +315,15 @@ class AttributeAnalyzer:
             "pattern": pattern,
             "colors": [{"r": c["r"], "g": c["g"], "b": c["b"], "score": c["score"]}
                        for c in colors],
+            # BİLGİ AMAÇLI -- ⚠ ÖLÇÜLMEDİ (gerçek poster/afiş test kümesi
+            # yok, bkz. TASARIM_PROMPTS'un yorumu). Ne is_pet/species
+            # kapısını, ne tür/kimlik eşleştirmesini (matcher.py) etkiler;
+            # şu an yalnızca API yanıtında görünür. Ekranda gösterme ya da
+            # eşleştirmede kullanma (ör. kırpma zorunlu kılma) kararı, bu
+            # alanın doğruluğu gerçek verilerle ölçüldükten SONRA ayrıca
+            # alınacak.
+            "is_designed_graphic": is_designed_graphic,
+            "graphic_confidence": round(tasarim_conf, 4),
         }
 
     def predict_species(self, img_feat) -> tuple[str, float, bool]:
@@ -265,9 +331,18 @@ class AttributeAnalyzer:
 
         Güven her zaman "en olası hayvan sınıfının olasılığı"dır — çeldirici
         kazansa bile bu değer anlamını korur.
-        Tür 'unknown' iki farklı sebeple dönebilir:
+        Tür 'unknown' ÜÇ farklı sebeple dönebilir:
           - is_pet=False : kazanan bir çeldirici, yani fotoğrafta kedi/köpek yok
           - is_pet=True  : hayvan var ama kedi/köpek ayrımı yeterince net değil
+          - is_pet=True  : hayvan kanıtı tür atamaya YETECEK kadar güçlü değil
+                           (hayvan_toplam < SPECIES_GATE_MIN)
+
+        Üçüncü durum 20.08.2026'da eklendi. Ölçümde hayvansız 26 fotoğrafın
+        3'üne kendinden emin biçimde "dog" deniyordu (yangın tüpü, şelale);
+        `is_pet` kapısı onları hayvan sanmıştı ve kedi/köpek yarışması iki
+        seçenek üzerinden yapıldığı için güven doygunlaşıyordu — %82 "köpek".
+        `species_confidence` "fotoğrafta hayvan var mı" sorusunu HİÇ ölçmez,
+        yalnız "hayvansa hangisi" sorusunu ölçer; tek başına kapı olamaz.
         """
         if not isinstance(img_feat, torch.Tensor):
             img_feat = torch.tensor(img_feat, dtype=torch.float32).unsqueeze(0)
@@ -291,7 +366,11 @@ class AttributeAnalyzer:
         en_iyi = int(tur_probs.argmax())
         guven = float(tur_probs[en_iyi])
 
-        if not hayvan_mi or guven < self.SPECIES_MIN_PROB:
+        # Tür ataması için hayvan kanıtının KENDİSİ de yeterli olmalı: is_pet
+        # kapısı bilerek gevşek (kimseyi elemesin diye), tür ise eliyor.
+        if (not hayvan_mi
+                or hayvan_toplam < self.SPECIES_GATE_MIN
+                or guven < self.SPECIES_MIN_PROB):
             return "unknown", guven, hayvan_mi
         return self._species_keys[en_iyi], guven, True
 

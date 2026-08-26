@@ -1,31 +1,259 @@
 name: CI
 
+# Neden var: bu depoda testler yalnızca elle koşuluyordu ve bir PR'da kırık kalan
+# bir test (test_perfect_match) kimsenin gözüne çarpmadan main'e kadar geldi.
+# Backend deposunda CI vardı, burada yoktu. Amaç tam olarak bunu engellemek.
+
 on:
   push:
-    branches: [ "**" ]
+    branches: [ "main" ]
   pull_request:
-    branches: [ "**" ]
+    branches: [ "main", "feature/instagram-intelligence" ]
+
+# Aynı dala yeni bir itme gelirse eskisini iptal et: aşağıdaki imaj işi ~10
+# dakika sürüyor ve üst üste binen koşumlar runner kuyruğunu tıkar.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     runs-on: ubuntu-latest
 
+    env:
+      # Kimlik modelini AÇIKÇA sabitliyoruz. tests/conftest.py zaten setdefault ile
+      # "clip" koyuyor ama burada tekrar yazmak iki işe yarıyor: (1) koşumun hangi
+      # yapılandırmayı sınadığı log'a bakmadan görünür, (2) conftest'teki varsayılan
+      # ileride değişirse CI sessizce 1,4 GB'lık SigLIP2 ağırlığını indirmeye başlamaz.
+      # Üretim siglip2-animal ile çalışıyor; buradaki yeşil, üretim modelinin
+      # doğruluğunu DEĞİL kodun sağlamlığını gösterir.
+      KIMLIK_MODEL: clip
+      # app/indirici.py bu değişkeni içe aktarma anında okuyor. Boş bırakılmazsa
+      # "yerel adresler reddedilir" (SSRF) testleri yanlış yönde kırılır.
+      PHOTO_ALLOWED_HOSTS: ""
+
     steps:
-    - uses: actions/checkout@v4
+      - name: Repoyu klonla
+        uses: actions/checkout@v4
 
-    - name: Python Kurulumu
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-        cache: 'pip'
+      - name: Python 3.11 kurulumu
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"   # Dockerfile ile aynı taban
+          cache: pip
 
-    - name: Bağımlılıkları Yükle
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
+      - name: HuggingFace önbelleği
+        # CLIP ağırlıkları (~600 MB) app/embedder.py içe aktarılır aktarılmaz
+        # iniyor. Önbelleğe alınmazsa her koşumda yeniden inerdi.
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-clip-vit-base-patch32-v1
 
-    - name: Testleri Çalıştır
-      env:
-        PYTHONPATH: .
-      run: |
-        pytest tests/ -ra -q
+      - name: Bağımlılıklar
+        # torch AYRI ve ÖNCE kuruluyor: PyPI'daki Linux torch'u CUDA yapısı (~2,5 GB),
+        # bize CPU yapısı yetiyor. Sürümler requirements.txt ile birebir aynı olduğu
+        # için ikinci komut torch'u yeniden kurmaz. (Aynı reçete requirements.txt
+        # başındaki notta yazıyor.)
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch==2.13.0 torchvision==0.28.0 --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - name: Testler
+        # -ra: ATLANAN testlerin gerekçesi çıktıya yazılır. Bu önemli —
+        # tests/seed_data/ depoda değil (Oxford-IIIT Pet, ~800 MB, KVKK'dan bağımsız
+        # olarak ağır) ve ona bağlı testler sessizce atlanıyor. "Hepsi yeşil"
+        # görüntüsü, atlananlar görünmezse yanıltıcı olur.
+        run: pytest tests/ -ra -q
+
+  docker:
+    # NEDEN AYRI BİR İŞ: `test` işi KODU sınıyor, bu iş PAKETLEMEYİ sınıyor.
+    # Üretimde patlayan hata kodda değildi: imajın CMD'i yalnız uvicorn'u
+    # başlatıyor, `python -m app.kuyruk` hiç çalışmıyordu. Bütün birim testler
+    # yeşilken ilanlar sonsuza kadar ai_status=PENDING kalıyordu. Hiçbir birim
+    # test bunu göremez — yalnızca imajı GERÇEKTEN ÇALIŞTIRMAK görebilir.
+    #
+    # needs: test -> birim testler kırıkken 10 dakikalık imaj yapımına girme.
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30   # asılı kalan bir broker 6 saat runner yakmasın
+
+    env:
+      # Sürüm SABİT, `3-alpine` gibi kayan etiket değil: kayan sürüm gelecekte
+      # sebepsiz kırılma üretir ve hangi koşumda ne sınandığı belirsizleşir.
+      # (requirements.txt'in başındaki gerekçenin aynısı.)
+      RABBIT_IMAJ: rabbitmq:3.13.7-alpine
+      AG: patimati-ci
+
+    steps:
+      - name: Repoyu klonla
+        uses: actions/checkout@v4
+
+      - name: Disk (öncesi)
+        # İmaj ~3 GB + önbellek. "14 GB'a sığar mı" sorusunun cevabı tahmin
+        # değil ÖLÇÜM olsun; bir gün sığmadığında burada görünsün.
+        run: df -h /
+
+      - name: Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: İmajı kur
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true          # imajı yerel docker daemon'a aktar (docker run için şart)
+          tags: patimati-ai:ci
+          build-args: |
+            KIMLIK_MODEL=clip
+          cache-from: type=gha
+          # mode=max DEĞİL: bu tek aşamalı bir build, ihtiyacımız olan bütün
+          # katmanlar (pip kurulumu + ~600 MB CLIP indirmesi) zaten NİHAİ imajın
+          # katmanları. mode=max yalnızca dışa aktarımı şişirir; GHA önbelleği
+          # depo başına 10 GB ve o kotayı `test` işinin HuggingFace
+          # önbelleğiyle PAYLAŞIYORUZ — şişirmek onu tahliye ettirir.
+          cache-to: type=gha,mode=min
+
+      - name: Ağ ve RabbitMQ
+        # NEDEN GitHub `services:` DEĞİL: servis konteynerleri GitHub'ın kendi
+        # ağında duruyor ve elle `docker run` ettiğimiz AI konteynerini o ağa
+        # sokmak için ağ adını tahmin etmek gerekiyor. Ağı açıkça kurmak hem
+        # okunur hem üretime daha yakın: AI servisi broker'a `rabbitmq` ADIYLA
+        # ulaşıyor, yani AMQP_URL'in gerçekten okunduğunu da kanıtlıyoruz.
+        run: |
+          docker network create "$AG"
+          docker run -d --name rabbitmq --network "$AG" \
+            --health-cmd "rabbitmq-diagnostics -q ping" \
+            --health-interval 5s --health-retries 24 \
+            "$RABBIT_IMAJ"
+
+      - name: RabbitMQ hazır olsun
+        run: |
+          for i in $(seq 1 60); do
+            durum=$(docker inspect -f '{{.State.Health.Status}}' rabbitmq)
+            if [ "$durum" = healthy ]; then echo "hazır ($((i*2)) sn)"; exit 0; fi
+            sleep 2
+          done
+          echo "RabbitMQ 120 sn'de hazır olmadı"; docker logs rabbitmq; exit 1
+
+      - name: AI konteynerini başlat (VARSAYILAN rol)
+        # SERVIS_ROLU BİLEREK VERİLMEDİ: varsayılanın "hepsi" olduğunu ve TEK
+        # `docker run`ın iki süreci birden kaldırdığını da sınıyoruz.
+        #
+        # PHOTO_ALLOWED_HOSTS=127.0.0.1 YALNIZCA TEST İÇİNDİR: sahte_java.py
+        # fotoğrafı konteynerin İÇİNDE geçici bir HTTP sunucusundan servis
+        # ediyor. Üretimde buraya CDN alan adı yazılır (bkz. .env.example).
+        run: |
+          docker run -d --name ai --network "$AG" -p 8000:8000 \
+            -e AMQP_URL='amqp://guest:guest@rabbitmq:5672/%2F' \
+            -e PHOTO_ALLOWED_HOSTS=127.0.0.1 \
+            -e KIMLIK_MODEL=clip \
+            patimati-ai:ci
+
+      - name: /health cevap versin (HTTP süreci ayakta mı)
+        # Bu adım tek başına "uvicorn çalışıyor" der. Sonraki adım "tüketici de
+        # çalışıyor" der. İKİSİ BİRDEN gerekli: entrypoint yalnızca birini
+        # başlatsaydı adımlardan biri kırmızı olurdu — her iki yönde de.
+        run: |
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:8000/health; then echo; exit 0; fi
+            sleep 2
+          done
+          echo "180 sn'de /health cevap vermedi"; docker logs ai; exit 1
+
+      - name: Uçtan uca kanıt (sahte_java.py konteynerin İÇİNDE)
+        # scripts/ .dockerignore'da, yani imajda YOK — çalışırken kopyalıyoruz.
+        # İÇERİDE koşuyoruz çünkü betiğin geçici HTTP sunucusu 127.0.0.1'e
+        # bağlanıyor ve tüketiciyle AYNI AĞ İSİM UZAYINDA olması gerekiyor;
+        # böylece host-gateway numaralarına gerek kalmıyor.
+        #
+        # Fotoğraf SENTETİK DEĞİL: degerlendirme/test_resim.jpg depoda duruyor
+        # ve README elle koşum için zaten onu gösteriyor. Sentetik bir görüntü
+        # de sözleşmeye uygun bir cevap üretirdi, ama app/attributes.py'nin
+        # çeldirici listesinde "a blank or solid color image" var — yani
+        # is_pet=false/species=unknown dalını sınamış olurduk. Gerçek fotoğrafın
+        # maliyeti sıfır, kanıtı daha güçlü.
+        run: |
+          docker exec ai mkdir -p /app/scripts /app/degerlendirme
+          docker cp scripts/sahte_java.py        ai:/app/scripts/sahte_java.py
+          docker cp degerlendirme/test_resim.jpg ai:/app/degerlendirme/test_resim.jpg
+          docker exec ai python /app/scripts/sahte_java.py \
+            --dosya /app/degerlendirme/test_resim.jpg --bekle 240
+
+      - name: Hata yolları (DLQ + status:error) — broker üzerinde
+        # Fotoğraf gerekmez, birkaç saniye sürer. Birim testler topolojinin
+        # doğru İLAN EDİLDİĞİNİ gösteriyor; bu, RabbitMQ'nun gerçekten öyle
+        # YÖNLENDİRDİĞİNİ. DLQ yanlış anahtarla bağlı olsaydı ilan yine
+        # başarılı olur, mesajlar hata vermeden yok olurdu.
+        run: docker exec ai python /app/scripts/sahte_java.py --hata-yollari
+
+      - name: Bellek ölçümü (rol=hepsi'nin gerçek maliyeti)
+        # README "bellek kabaca ikiye katlanır" diyor. Bu depoda iddialar
+        # ölçülür (bkz. docs/olcum-raporu.md); sayı burada görünsün.
+        run: docker stats --no-stream ai
+
+      - name: Tüketici ölünce konteyner de ÖLMELİ (fail-fast kanıtı)
+        # BU ADIM OLMAZSA entrypoint'in en kritik davranışı hiç sınanmaz:
+        # tüketici ölür, /health hâlâ 200 döner, ilanlar sessizce PENDING'de
+        # kalır — düzeltmeye çalıştığımız hatanın TA KENDİSİ.
+        #
+        # PID'i entrypoint'in KENDİ günlüğünden okuyoruz: imajda pgrep yok
+        # (procps kurulu değil). Bu, entrypoint.sh'taki "http pid=... kuyruk
+        # pid=..." satırının biçimine bağlıdır; orası değişirse burası da değişmeli.
+        run: |
+          kpid=$(docker logs ai 2>&1 | sed -n 's/.*kuyruk pid=\([0-9]*\).*/\1/p' | tail -1)
+          test -n "$kpid" || { echo "entrypoint pid basmadı"; docker logs ai; exit 1; }
+          echo "tüketici pid=$kpid öldürülüyor"
+          docker exec ai bash -c "kill -9 $kpid"
+          timeout 60 docker wait ai > /tmp/rc \
+            || { echo "konteyner ölmedi — fail-fast ÇALIŞMIYOR"; docker logs ai; exit 1; }
+          rc=$(cat /tmp/rc); echo "konteyner çıkış kodu: $rc"
+          [ "$rc" -ne 0 ] \
+            || { echo "sıfır ile çıktı: --restart on-failure DEVREYE GİRMEZ"; exit 1; }
+
+      - name: kuyruk rolü + PID 1'de düzgün kapanış
+        # İKİ ŞEYİ BİRDEN kanıtlar:
+        #  1) SERVIS_ROLU=kuyruk gerçekten YALNIZCA tüketiciyi başlatıyor
+        #  2) app/kuyruk.py'deki SIGTERM işleyicisi ÇALIŞIYOR. Bu rolde süreç
+        #     `exec` ile PID 1'dir ve Linux, PID 1'e gelen ve İŞLEYİCİSİ OLMAYAN
+        #     sinyali SESSİZCE YUTAR. İşleyici yoksa `docker stop` 10 sn bekler
+        #     ve SIGKILL'e düşer -> çıkış kodu 137. İşleyici varsa dinle()
+        #     düzgün kapanır -> çıkış kodu 0.
+        #
+        # Çıkış koduna bakıyoruz, günlükteki TÜRKÇE METNE DEĞİL: Türkçe dizgi
+        # aramak bu depoda bir bekçiyi sessizce işlevsiz bırakmıştı
+        # (bkz. tests/test_docker_baslatma.py başındaki eşik/eşiği notu).
+        run: |
+          docker run -d --name ai-kuyruk --network "$AG" \
+            -e SERVIS_ROLU=kuyruk \
+            -e AMQP_URL='amqp://guest:guest@rabbitmq:5672/%2F' \
+            -e KIMLIK_MODEL=clip \
+            patimati-ai:ci
+          for i in $(seq 1 120); do
+            docker logs ai-kuyruk 2>&1 | grep -q "Kuyruk dinleniyor" && break
+            sleep 2
+          done
+          docker logs ai-kuyruk 2>&1 | grep -q "Kuyruk dinleniyor" \
+            || { echo "tüketici bağlanmadı"; docker logs ai-kuyruk; exit 1; }
+          # HTTP sunucusu bu rolde HİÇ olmamalı
+          docker exec ai-kuyruk sh -c 'curl -fsS http://127.0.0.1:8000/health' \
+            && { echo "kuyruk rolünde HTTP sunucusu çalışıyor — rol ayrımı bozuk"; exit 1; } \
+            || echo "beklendiği gibi: kuyruk rolünde HTTP yok"
+          basla=$(date +%s)
+          docker stop -t 30 ai-kuyruk
+          sure=$(( $(date +%s) - basla ))
+          rc=$(docker inspect -f '{{.State.ExitCode}}' ai-kuyruk)
+          echo "kapanma: ${sure} sn, çıkış kodu: ${rc}"
+          [ "$rc" = "0" ] \
+            || { echo "çıkış kodu $rc (137 = SIGKILL: SIGTERM işlenmedi)"; docker logs ai-kuyruk; exit 1; }
+          [ "$sure" -lt 10 ] \
+            || { echo "kapanma 10 sn'yi aştı: sinyal yutulmuş olabilir"; exit 1; }
+
+      - name: Arıza günlükleri
+        if: failure()
+        run: |
+          docker logs ai        || true
+          docker logs ai-kuyruk || true
+          docker logs rabbitmq  || true
+          docker ps -a
+          df -h /

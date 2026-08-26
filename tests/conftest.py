@@ -19,9 +19,20 @@ servis siglip2/768 ile çalışırken testler clip/512 ile geçiyordu.
   - `setdefault` kullanılıyor, düz atama değil: kabuktan açıkça verilen değer
     kazanmalı ki kazanan modeli de sınayabilelim:
         $env:KIMLIK_MODEL="siglip2-animal"; pytest tests/
-  - Varsayılan `clip`, çünkü SigLIP2 ağırlıkları 1,4 GB ve depoda değil.
+  - Burada `clip` sabitleniyor, çünkü SigLIP2 ağırlıkları 1,4 GB ve depoda değil.
     Testler ağırlık indirmeden, her ekip arkadaşının makinesinde çalışmalı.
     Testin ne sınadığı makineden makineye değişmemeli.
+
+🔴 DİKKAT — 19.08.2026'dan beri bu satır ÜRETİMİN VARSAYILANINI EZİYOR:
+`app/surum.py` varsayılanı artık `siglip2-animal`, buradaki sabitleme ise `clip`.
+Bu bilinçli, ama bedeli şudur: **yeşil test, üretimin kullandığı modelin
+doğruluğunu KANITLAMAZ.** Testler modelden bağımsız olan şeyi (kodun sağlamlığı,
+vektör boyutunun tutarlılığı, sözleşme alanları) sınıyor. Kazanan modelle
+sınamak isteyen kabuktan açıkça versin (yukarıdaki satır).
+
+Varsayılanın üç yerde (app/surum.py · .env.example · Dockerfile) aynı kalmasını
+`test_varsayilan_model_tutarliligi.py` denetliyor; burada `clip` yazması onu
+bozmaz, çünkü o bekçi ortam değişkenine değil KAYNAKTAKİ varsayılana bakıyor.
 """
 import os
 

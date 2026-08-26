@@ -1,0 +1,36 @@
+# Bu depoda .gitattributes YOKTU ve Git for Windows'un varsayılanı
+# core.autocrlf=true. Ölçüldü (git ls-files --eol):
+#
+#     i/lf    w/crlf    attr/          Dockerfile
+#
+# Yani nesne veritabanındaki içerik zaten LF; CRLF olan yalnızca ÇALIŞMA AĞACI.
+#
+# NEDEN ÖNEMLİ: `docker build` ÇALIŞMA AĞACINDAN kopyalar, git nesnesinden
+# değil. CRLF'li bir kabuk betiği imaja girerse Linux şunu der:
+#
+#     /entrypoint.sh: line 1: #!/bin/bash^M: bad interpreter
+#
+# Bizde CMD betiği açıkça `bash` ile çağırdığı için hata şu biçime dönüşür:
+#
+#     [entrypoint] HATA: SERVIS_ROLU=$'hepsi\r' tanınmıyor
+#
+# (case dalları eşleşmez, çünkü değişkenin sonunda \r vardır. entrypoint.sh
+# rolü bilerek printf '%q' ile basıyor — %s olsaydı ekranda "hepsi" görünür ve
+# case'in neden eşleşmediği hiç anlaşılmazdı.)
+#
+# EN SİNSİ TARAFI ASİMETRİ: CI Linux'ta klonluyor, dosya oraya LF geliyor ve
+# CI YEŞİL KALIYOR. Kırılan yalnızca Windows'taki geliştiricinin lokal
+# build'i. Bu yüzden ikinci bir ağ daha var: tests/test_docker_baslatma.py
+# entrypoint.sh'i İKİLİ okuyup içinde \r arıyor — o test geliştiricinin
+# makinesinde patlar, CI'da geçer, yani asimetriyi kapatır.
+*.sh text eol=lf
+
+# Dockerfile: RUN satırları `\` ile devam eden kabuk blokları içeriyor
+# (KIMLIK_MODEL case bloğu). BuildKit bugün CRLF'i tolere ediyor ama bu bir
+# garanti değil; sabitlemenin maliyeti sıfır.
+Dockerfile text eol=lf
+
+# BİLEREK YAZILMADI: `* text=auto`. Güvenli olurdu (bütün blob'lar zaten LF,
+# ölçüldü) ama degerlendirme/ altındaki .jpg/.png dosyalarını git'in ikili
+# sezgisine bırakır. Gerekirse ayrı bir commit'te, açık `*.jpg binary` /
+# `*.png binary` satırlarıyla yapılmalı — bu paketin işi değil.

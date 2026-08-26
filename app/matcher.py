@@ -9,9 +9,92 @@ from .surum import MODEL_SURUMU, VEKTOR_BOYUTU
 
 logger = logging.getLogger(__name__)
 
-# Bildirim eşiği — ortam değişkeninden ayarlanabilir (varsayılan 0.70,
-# 111 fotoğrafla ölçülerek doğrulandı; bkz. scripts/measure_threshold.py)
-MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.70"))
+# Bildirim eşiği — ortam değişkeninden ayarlanabilir.
+#
+# ÖLÇÜT (asıl mesele bu; sayı bunun sonucu):
+#   Sözleşme §7 gereği eşiği geçemeyen adaylar arayüzde LİSTELENMEYE DEVAM
+#   EDER, yalnızca bildirim tetiklenmez. Yani eşiği yükseltmek eşleşme
+#   KAYBETTİRMEZ — sadece telefonu daha az titretir. Buradan:
+#     - kaçırmanın (bildirim gitmemesi) bedeli DÜŞÜK: eşleşme listede duruyor
+#     - yalanın (yanlış bildirim) bedeli YÜKSEK: kullanıcı yanlış hayvanın
+#       ilanına gidiyor ve bir daha bildirimlere güvenmiyor
+#   ⇒ eşik, isabet (precision) tarafına yaslanmalı.
+#
+# Kısa geçmişi, çünkü buraya bakan bir sonraki kişi "hangi sayı doğru" diye soracak:
+#   - Uzun süre 0.70'ti (o günkü gerekçe: scripts/measure_threshold.py).
+#   - 2026-08-13'te 0.65'e indirildi. O kalibrasyon 5 fotoğrafın 10 YABANCI
+#     çiftinden türetilmişti: kümede aynı hayvana ait tek bir çift bile yoktu,
+#     yani "aynı hayvan bu eşiği hâlâ geçiyor mu" hiç ölçülmemişti. Ayrıca
+#     üretimdekinden farklı bir kimlik modeliyle (google-siglip2) koşulmuştu.
+#   - Üretim modeli (siglip2-animal) ve bu dosyadaki compute_final_score ile
+#     İKİ TARAFLI ölçüldüğünde 0.65 belirgin biçimde daha kötü çıktı:
+#     yanlış alarm %57.7 -> %80.5, buna karşılık yakalama %94.9 -> %96.9.
+#     Yani 22.8 puan yanlış alarmın karşılığı 2 puan yakalama.
+#   - Aynı ölçümün tam taraması (149 negatif, 98 pozitif sorgu):
+#         eşik   yanlış alarm   yakalama
+#         0.65      %80.5         %96.9
+#         0.70      %57.7         %94.9
+#         0.75      %32.9         %90.8
+#         0.80      %13.4         %68.4   <- seçilen
+#         0.85       %3.4         %40.8
+#   ⇒ Yukarıdaki ölçüte göre 0.80. 0.70'te yabancıların YARISINDAN FAZLASI
+#     eşiği geçiyordu; o değerle bildirim özelliği açılsa kullanıcıların
+#     çoğuna yanlış hayvan bildirilirdi. 0.80'de bildirim gitmeyen gerçek
+#     eşleşmeler kayıp değil: "Eşleşmelerim" listesinde görünmeye devam
+#     ediyorlar (bkz. yukarıdaki ölçüt).
+#
+#   Ölçümün iki sınırı, ikisi de 0.80'i ZAYIFLATMIYOR:
+#     - Galeri 50 kimlik; üretimin aday üst sınırı 100 ⇒ ölçtüğümüz boyut
+#       gerçeğe yakın. Galeri büyüdükçe yanlış alarm ARTAR, yani daha yüksek
+#       eşik gerekir — ters yön değil.
+#     - Konum her karşılaştırmada sabit 5 km (veri kümesinde konum yok).
+#       Gerçekte adaylar 25 km'ye kadar dağılıyor ve uzaklık skoru DÜŞÜRÜYOR
+#       ⇒ gerçek yanlış alarm ölçtüğümüzden biraz daha iyi çıkar.
+#   Açık iş: gerçek mesafeler ve daha geniş galeriyle bir kez daha ölçmek.
+#   Ölçüm tabloları docs/olcum-raporu.md §4.1'de.
+#
+# Eşiğin ne demek olduğu için sözleşme §7: `match: true` "kesin aynı hayvan"
+# değil, "bildirim gönderecek kadar eminiz" demektir. Eşiği geçmeyen adaylar
+# arayüzde listelenmeye devam eder — bu yüzden eşiği yükseltmek eşleşmeleri
+# KAYBETTİRMEZ, yalnızca bildirim gönderilenleri azaltır.
+MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.80"))
+
+# --- Skor kanallarının ağırlıkları ve konum cezasının sertliği ---------------
+#
+# NEDEN ORTAMDAN: 19.08 ölçümü, aynı hayvanın birebir aynı fotoğrafının
+# 3 km uzaktayken eşiği geçemediğini gösterdi (görsel 0.9417, etiket 0.4800,
+# skor 0.7558 < 0.80); cebirsel azami mesafe 432 m çıktı — oysa aday arama
+# yarıçapı 25 km. Ama hangi sayının doğru olduğu ÖLÇÜLMEDEN bilinemez:
+# bir sayıyı gevşetmek yanlış-pozitif üretir ve o etki ancak çok bireyli
+# veriyle ölçülür (scripts/yanlis_pozitif_egrisi.py bunu üretiyor).
+#
+# Bu yüzden burada hiçbir sayı DEĞİŞTİRİLMİYOR; yalnız ölçüm sonucuna göre
+# dağıtım yapmadan denenebilir hâle getiriliyor. Varsayılanlar eski
+# davranışın birebir aynısı.
+GORSEL_AGIRLIK = float(os.getenv("GORSEL_AGIRLIK", "0.55"))
+ETIKET_AGIRLIK = float(os.getenv("ETIKET_AGIRLIK", "0.30"))
+KONUM_AGIRLIK = float(os.getenv("KONUM_AGIRLIK", "0.15"))
+
+# konum = 1 / (1 + km / KONUM_YARI_MESAFE_KM) — bu mesafede konum skoru 0.50.
+KONUM_YARI_MESAFE_KM = float(os.getenv("KONUM_YARI_MESAFE_KM", "5.0"))
+
+# Ağırlıklar toplamı 1 değilse skor artık [0,1] aralığında DEĞİLDİR ve eşik
+# başka bir şey ölçmeye başlar. Sessizce yanlış çalışmaktansa açılmıyoruz:
+# yanlış ayar dağıtımda değil, ilk saniyede görünsün.
+_AGIRLIK_TOPLAMI = GORSEL_AGIRLIK + ETIKET_AGIRLIK + KONUM_AGIRLIK
+if abs(_AGIRLIK_TOPLAMI - 1.0) > 1e-9:
+    raise ValueError(
+        "Skor ağırlıklarının toplamı 1.0 olmalı; şu an %.4f "
+        "(GORSEL_AGIRLIK=%.4f, ETIKET_AGIRLIK=%.4f, KONUM_AGIRLIK=%.4f). "
+        "Toplam 1 değilse eşik (%.2f) artık aynı şeyi ölçmez."
+        % (_AGIRLIK_TOPLAMI, GORSEL_AGIRLIK, ETIKET_AGIRLIK, KONUM_AGIRLIK,
+           MATCH_THRESHOLD))
+
+if KONUM_YARI_MESAFE_KM <= 0:
+    raise ValueError(
+        "KONUM_YARI_MESAFE_KM pozitif olmalı; şu an %.4f. "
+        "Sıfır ya da negatif değer konum skorunu tanımsız yapar."
+        % KONUM_YARI_MESAFE_KM)
 
 # Sözleşmede aday üst sınırı 100; burada da zorluyoruz ki gelen liste büyükse
 # sessizce boğulmak yerine kırpıp raporlayalım (bkz. sözleşme §5).
@@ -89,18 +172,31 @@ def jaccard_score(labels_a: list, labels_b: list) -> float:
     return intersection / union if union > 0 else 0.0
 
 
-def location_score(distance_km: float) -> float:
+def location_score(distance_km: float | None) -> float:
     """
     Mesafe bazlı skor: yakınsa yüksek, uzaksa düşük.
+    Varsayılan yarı-mesafeyle (5 km):
     0 km → 1.00, 5 km → 0.50, 20 km → 0.20, 50 km → 0.09
+    Eğri KONUM_YARI_MESAFE_KM ile ayarlanır; yukarıdaki sayılar
+    varsayılana aittir, sabit değildir.
 
     Negatif mesafe fiziksel olarak anlamsızdır ama gelirse iki ayrı hataya yol
     açıyordu: -5 km ZeroDivisionError ile servisi çökertiyor, -1 km ise 1.25
     döndürüp skoru üst sınırın üstüne çıkarıyordu. Sıfıra kırpıyoruz.
+
+    None = mesafe BİLİNMİYOR ve GEÇERSİZ mesafeyle (NaN/inf) aynı davranır.
+    Sebebi: konum skoru toplamın %15'i ve 0 km maksimum puan demek. Alanı hiç
+    göndermeyen bir çağıran, "bilmiyorum"un karşılığı olarak sessizce EN İYİ
+    puanı alıyordu — eşiğin 0.80 olduğu bir sistemde 0.15'lik sessiz bonus,
+    0.65 ile 0.80 arasındaki tüm farktan büyük.
+
+    ⚠ Açıkça verilen 0.0 hâlâ meşru "aynı noktada" demektir ve 1.0 döndürür;
+    değişen yalnızca bilginin HİÇ olmadığı durum.
     """
-    if not np.isfinite(distance_km):
+    if distance_km is None or not np.isfinite(distance_km):
         return 0.0
-    return 1.0 / (1.0 + max(0.0, float(distance_km)) / 5.0)
+    return 1.0 / (1.0 + max(0.0, float(distance_km))
+                  / KONUM_YARI_MESAFE_KM)
 
 
 def compute_final_score(
@@ -108,15 +204,23 @@ def compute_final_score(
     embeddings_b,
     labels_a: list,
     labels_b: list,
-    distance_km: float,
+    distance_km: float | None,
     species_a: str = "unknown",
     species_b: str = "unknown",
+    threshold: float | None = None,
 ) -> dict:
     """
     Hibrit eşleşme skoru hesaplar. Her iki taraf da birden çok fotoğraf
     taşıyabilir; görsel benzerlik en iyi fotoğraf çiftinden alınır.
     Farklı türler (kedi vs köpek) için skor otomatik sıfırlanır.
+
+    `threshold`: None ise modül seviyesindeki MATCH_THRESHOLD kullanılır —
+    mevcut hiçbir çağıran için davranış değişmez. Instagram tarafı Java'dan
+    kaynak bazlı bir eşik gönderebilir (Faz 2); 0.80 hiçbir kaynak için
+    doğrulanmış "kesin" bir değer değildir, yalnızca native için kalibre
+    edildi (bkz. yukarıdaki ölçüm notu).
     """
+    esik = MATCH_THRESHOLD if threshold is None else threshold
     # Tür uyumsuzluğu — erken çıkış.
     # Cevap şekli normal yolla BİREBİR aynı olmalı: eksik anahtar Spring
     # tarafındaki DTO'yu kırıyordu (demo sırasında bulunan gerçek bir hataydı).
@@ -181,7 +285,9 @@ def compute_final_score(
 
     # Kosinüs teorik olarak negatif olabildiği için toplam da [0,1] dışına
     # çıkabilir; skor her zaman yorumlanabilir bir aralıkta kalsın.
-    score = (0.55 * visual) + (0.30 * label) + (0.15 * location)
+    score = ((GORSEL_AGIRLIK * visual)
+             + (ETIKET_AGIRLIK * label)
+             + (KONUM_AGIRLIK * location))
     
     # Bonus özellikler uyuşmazsa ceza vermez, eşleşirse +0.02 bonus verir
     for ba in bonus_a:
@@ -195,7 +301,7 @@ def compute_final_score(
         "visual": round(visual, 4),
         "label": round(label, 4),
         "location": round(location, 4),
-        "match": score >= MATCH_THRESHOLD,
+        "match": score >= esik,
         # Hangi fotoğraf çifti eşleşti — arayüzde "bu ikisi benziyor" diye
         # gösterilebilir, hata ayıklarken de hangi karenin tuttuğunu söyler.
         "photo_a": foto_a,
@@ -203,8 +309,30 @@ def compute_final_score(
     }
 
 
+def _aday_kimligi(aday_veya_id) -> tuple:
+    """Bir adayın (ya da sorgunun) kimliğini tekil bir anahtara çevirir.
+
+    Faz 2 öncesi kimlik tek başına `ad_id`'ydi. Artık bir aday/sorgu ya
+    native bir ilan (`ad_id`) ya da Instagram kökenli bir external_pet_records
+    kaydı (`external_record_id`) olabilir — ikisi asla aynı anda dolu değildir
+    (bkz. models.py). (tip, değer) çifti, iki farklı kaynaktan gelen ve
+    tesadüfen aynı sayısal id'ye sahip olabilecek kayıtların birbirine
+    KARIŞMAMASINI garanti eder — yalnızca `ad_id == ad_id` karşılaştırması
+    yapılsaydı bir external kaydın id'si 98 iken bir ad'ın id'si de 98 olduğunda
+    yanlışlıkla "aynı kayıt" sayılırdı.
+    """
+    ad_id = getattr(aday_veya_id, "ad_id", None)
+    external_record_id = getattr(aday_veya_id, "external_record_id", None)
+    if ad_id is not None:
+        return ("AD", ad_id)
+    if external_record_id is not None:
+        return ("EXTERNAL", external_record_id)
+    return (None, None)
+
+
 def adaylari_eslestir(embeddings, labels, species, candidates,
-                      ad_id=None, model_version=MODEL_SURUMU):
+                      ad_id=None, external_record_id=None,
+                      model_version=MODEL_SURUMU, threshold=None):
     """Adayları skorlar, sıralar; eleyip atladıklarını sayarak raporlar.
 
     Tek bir bozuk aday tüm isteği düşürmemeli — o yüzden hatalı aday atlanır,
@@ -215,8 +343,25 @@ def adaylari_eslestir(embeddings, labels, species, candidates,
     KATIDIR — sürümü tutmayan aday atlanır, çünkü farklı sürümle üretilmiş
     vektörler kıyaslanamaz ve hata vermeden yanlış benzerlik üretir.
 
+    ad_id / external_record_id: SORGUNUN kendi kimliği — verilirse aday
+    listesindeki aynı kimlikli kayıt "kendisi" sayılıp elenir. Faz 2 öncesi
+    yalnızca `ad_id` vardı; ikisi birden verilmez (bkz. _aday_kimligi).
+
+    threshold: bkz. compute_final_score. None ise MATCH_THRESHOLD kullanılır.
+
+    SORGUNUN kendi embedding'i (aday değil, `embeddings` parametresi) burada,
+    döngüden ÖNCE doğrulanır. Doğrulanmazsa `compute_final_score` her aday
+    için aynı hatayla patlar ve döngüdeki try/except bunu "bu aday bozuk" diye
+    yorumlayıp her adayı `gecersiz_embedding` altında sessizce eler — çağıran
+    tarafın KENDİ isteği bozuk olsa bile sonuç "eşleşme yok" gibi görünür.
+    Burada erken ve açıkça fırlatmak, hatanın doğru yere (çağıran) gitmesini
+    sağlar (bkz. `app/main.py`'deki `/match` ucu, bunu 400'e çeviriyor).
+
     Dönüş: (eşleşmeler, atlananlar)
     """
+    for vektor in _vektor_listesi(embeddings):
+        dogrula_embedding(vektor, "embeddings")
+
     atlanan = {"toplam": 0, "kendisi": 0, "tekrar_eden": 0,
                "model_surumu_uyusmuyor": 0, "gecersiz_embedding": 0,
                "aday_siniri_asildi": 0}
@@ -227,16 +372,22 @@ def adaylari_eslestir(embeddings, labels, species, candidates,
                        len(candidates), AZAMI_ADAY)
         candidates = candidates[:AZAMI_ADAY]
 
+    sorgu_kimligi = (("AD", ad_id) if ad_id is not None
+                     else ("EXTERNAL", external_record_id) if external_record_id is not None
+                     else (None, None))
+
     gorulen: set = set()
     sonuclar = []
     for aday in candidates:
-        if ad_id is not None and aday.ad_id == ad_id:
+        aday_kimligi = _aday_kimligi(aday)
+
+        if sorgu_kimligi != (None, None) and aday_kimligi == sorgu_kimligi:
             atlanan["kendisi"] += 1
             continue
-        if aday.ad_id in gorulen:
+        if aday_kimligi in gorulen:
             atlanan["tekrar_eden"] += 1
             continue
-        gorulen.add(aday.ad_id)
+        gorulen.add(aday_kimligi)
 
         if model_version is not None and aday.model_version != model_version:
             atlanan["model_surumu_uyusmuyor"] += 1
@@ -248,13 +399,18 @@ def adaylari_eslestir(embeddings, labels, species, candidates,
                 labels_a=labels, labels_b=aday.labels,
                 distance_km=aday.distance_km,
                 species_a=species, species_b=aday.species,
+                threshold=threshold,
             )
         except GecersizEmbedding as e:
-            logger.warning("Aday %s atlandı: %s", aday.ad_id, e)
+            logger.warning("Aday %s atlandı: %s", aday_kimligi, e)
             atlanan["gecersiz_embedding"] += 1
             continue
 
-        sonuclar.append({"ad_id": aday.ad_id, **sonuc})
+        sonuclar.append({
+            "ad_id": aday.ad_id,
+            "external_record_id": aday.external_record_id,
+            **sonuc,
+        })
 
     atlanan["toplam"] = sum(v for k, v in atlanan.items() if k != "toplam")
     sonuclar.sort(key=lambda x: x["score"], reverse=True)

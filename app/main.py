@@ -1,10 +1,11 @@
 # app/main.py
 import logging
 import os
+import secrets
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 
@@ -14,7 +15,7 @@ from .analiz import urlleri_analiz_et
 from .attributes import attribute_analyzer
 from .embedder import PetEmbedder, embedder, kimlik_gomucu
 from .hatalar import AIHatasi, FotografIndirilemedi, GecersizGoruntu
-from .matcher import adaylari_eslestir, compute_final_score
+from .matcher import MATCH_THRESHOLD, adaylari_eslestir, compute_final_score
 from .models import AnalyzeResponse, AnalyzeUrlRequest, MatchRequest
 from .surum import MODEL_SURUMU, SECILEN_KIMLIK, VEKTOR_BOYUTU
 
@@ -22,9 +23,71 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+ANAHTAR_BASLIGI = "X-Api-Key"
+
+
+def api_anahtari() -> str:
+    """Yapılandırılmış paylaşılan sır; boşsa korumalı uçlar HİÇBİR isteği kabul etmez.
+
+    Her çağrıda okunur, modül yüklenirken bir kez değil: değeri sabitlemek
+    testlerin ortamı değiştirmesini imkânsız kılar ve "anahtar verildi mi"
+    sorusunun cevabı yalnızca yeniden başlatmayla değişebilirdi.
+    """
+    return os.getenv("AI_API_KEY", "").strip()
+
+
+async def anahtari_dogrula(
+    x_api_key: str | None = Header(default=None, alias=ANAHTAR_BASLIGI),
+) -> None:
+    """Uçları paylaşılan bir sırla korur (A1). VARSAYILAN DAVRANIŞ: REDDET.
+
+    ANAHTAR YAPILANDIRILMAMIŞSA hiçbir istek geçmez — 401. Eskiden tersiydi:
+    anahtar yoksa kapı tamamen açılıyordu. Gerekçesi dağıtım sırasıydı, bu
+    servis tarayıcıdan da çağrılıyordu (`AddListingPage`) ve anahtarı bir anda
+    zorunlu kılmak ilan oluşturma ekranını kırardı. **O engel kalktı:** ön yüz
+    artık AI'ı doğrudan çağırmıyor (`/api/ai/analyze` üzerinden backend'e
+    gidiyor) ve backend `X-Api-Key` başlığını gönderiyor
+    (`AiMatchService`, `ai.service.api-key`).
+
+    Bir yapılandırma eksiği yüzünden kapının AÇILMASI yanlış varsayılandır:
+    unutulan bir ortam değişkeni sessizce "herkese açık AI servisi" üretir ve
+    canlıda bu, kaynak sömürüsü demektir. Unutulan değişkenin cezası
+    "çalışmıyor" olmalı, "korumasız çalışıyor" değil.
+
+    ⚠ Anahtarsız kurulum sessiz DEĞİLDİR: açılışta hata seviyesinde kayıt
+    düşer ve `/health` `api_anahtari_yapilandirildi: false` der. `/health`
+    bilerek anahtarsız kalır, yoksa canlılık yoklaması servisi ölü gösterirdi.
+
+    Karşılaştırma sabit zamanlıdır: sıradan `==` ilk farklı bayta kadar geçen
+    süreyi sızdırır ve anahtar bayt bayt tahmin edilebilir hâle gelir.
+    """
+    beklenen = api_anahtari()
+    if not beklenen:
+        # Anahtar yokken "geçerli anahtar" diye bir şey yoktur; karşılaştırmaya
+        # girmeden reddedilir. Boş sırla compare_digest yapmak, boş başlık
+        # gönderen herkesi içeri alırdı.
+        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED",
+                                                     "message": "Gecersiz veya eksik API anahtari"})
+
+    gelen = x_api_key or ""
+    if not secrets.compare_digest(gelen.encode("utf-8"), beklenen.encode("utf-8")):
+        # Eksik ile yanlış anahtar AYNI cevabı alır: hangisinin olduğunu
+        # söylemek, saldırgana anahtarın var olup olmadığını öğretirdi.
+        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED",
+                                                     "message": "Gecersiz veya eksik API anahtari"})
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("AI servisi başlatılıyor...")
+    if not api_anahtari():
+        # Uyarı değil HATA: bu hâlde servis ayakta ama İŞE YARAMAZ durumdadır,
+        # /analyze de /match de 401 döner. Kayıt seviyesi bunu söylemeli ki
+        # "kalktı demek ki çalışıyor" sanılmasın.
+        logger.error(
+            "AI_API_KEY tanımlı DEĞİL: /analyze, /analyze_url, /compare ve /match "
+            "uçlarının HEPSİ 401 dönecek. Aynı değer backend'in "
+            "ai.service.api-key ayarına da verilmeli, yoksa eşleştirme çalışmaz.")
     yield
     logger.info("AI servisi kapatılıyor.")
 
@@ -33,7 +96,10 @@ app = FastAPI(title="PatiMati AI Service", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv("ALLOWED_ORIGINS", "*")],
+    # Virgülle ayrılmış birden fazla origin desteklenir (ör. prod + staging).
+    # Tek elemanlı liste yazılsaydı CORSMiddleware tüm string'i TEK bir origin
+    # sanır, virgülden sonraki hiçbir origin asla eşleşmezdi.
+    allow_origins=[o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",") if o.strip()],
     allow_methods=["*"], allow_headers=["*"],
 )
 
@@ -42,30 +108,48 @@ app.add_middleware(
 async def health():
     # İki model birden çalışıyor; hangisinin ne yaptığı buradan görünsün ki
     # yanlış yapılandırmayla ayağa kalkan bir servis fark edilebilsin.
+    # Eşik de aynı sebeple burada: ortam değişkeniyle eziliyor, ve bir kez
+    # kod ile belgeler farklı değer söyler hâle geldi. Servisin GERÇEKTE
+    # hangi eşikle karar verdiği dışarıdan görünsün.
+    # Anahtarın YAPILANDIRILIP yapılandırılmadığı da aynı sebeple burada:
+    # anahtarı vermeyi unutmuş bir dağıtım, dışarıdan bakınca çalışan bir
+    # servisten ayırt edilemez — /health 200 döner ama korumalı uçların hepsi
+    # 401'dir. Anahtarın KENDİSİ değil, yalnız verilip verilmediği yazılır.
+    # (Alan eskiden `api_anahtari_zorunlu` idi; kilit artık her hâlükârda
+    # zorunlu olduğu için o soru tek cevaplı hâle geldi ve bilgi taşımıyordu.
+    # Dağıtımın cevaplanması gereken sorusu artık "anahtar verildi mi".)
+    # /health bilerek anahtarsız kalır: canlılık yoklaması kimlik isteseydi,
+    # servis "ölü" görünürdü.
     return {"status": "ok",
             "etiket_modeli": PetEmbedder.MODEL_ID,
             "kimlik_modeli": SECILEN_KIMLIK,
             "vektor_boyutu": VEKTOR_BOYUTU,
-            "model_version": MODEL_SURUMU}
+            "model_version": MODEL_SURUMU,
+            "match_threshold": MATCH_THRESHOLD,
+            "api_anahtari_yapilandirildi": bool(api_anahtari())}
 
 
-def _oznitelik_cikar(img_bytes: bytes) -> dict:
+def _oznitelik_cikar(img_bytes: bytes, embedding: list[float] | None) -> dict:
     """Öznitelikleri çıkarır; hata olursa boş etiketlerle devam eder.
 
     Embedding zaten hesaplandığı için eşleştirme etiketsiz de çalışır —
     öznitelik hatası tüm analizi düşürmemeli.
 
-    Kimlik vektörü buraya GEÇİRİLMEZ: kimlik modeli CLIP'ten farklıysa vektör
-    başka bir uzayda olur ve zero-shot metin karşılaştırması sessizce yanlış
-    etiket üretir. attribute_analyzer kendi CLIP vektörünü hesaplar.
+    `embedding` YALNIZCA kimlik modeli CLIP'in kendisiyse geçirilir (bkz.
+    `_goruntuyu_isle`): o zaman ikisi aynı uzaydadır ve CLIP'i aynı fotoğraf
+    için ikinci kez çalıştırmak anlamsızdır. Aksi halde None geçirilir ve
+    attribute_analyzer kendi CLIP vektörünü hesaplar — kimlik modeli farklıysa
+    (ör. SigLIP2) vektör başka bir uzayda olur ve zero-shot metin
+    karşılaştırması sessizce yanlış etiket üretir.
     """
     try:
-        return attribute_analyzer.analyze(img_bytes)
+        return attribute_analyzer.analyze(img_bytes, embedding=embedding)
     except Exception as e:
         logger.error(f"Öznitelik çıkarma hatası (etiketsiz devam ediliyor): {e}")
         return {"labels": [], "species": "unknown", "species_confidence": 0.0,
                 "is_pet": True, "breed": None, "breed_confidence": 0.0,
-                "pattern": None, "colors": []}
+                "pattern": None, "colors": [],
+                "is_designed_graphic": False, "graphic_confidence": 0.0}
 
 
 async def _goruntuyu_isle(img_bytes: bytes) -> tuple[list[float], dict]:
@@ -84,17 +168,18 @@ async def _goruntuyu_isle(img_bytes: bytes) -> tuple[list[float], dict]:
         logger.error(f"Embedding hatası: {e}")
         raise HTTPException(500, "Analiz sırasında hata oluştu.")
 
-    vision = await run_in_threadpool(_oznitelik_cikar, img_bytes)
+    onceden_hesaplanan = embedding if kimlik_gomucu.clip_mi else None
+    vision = await run_in_threadpool(_oznitelik_cikar, img_bytes, onceden_hesaplanan)
     return embedding, vision
 
 
-@app.post("/analyze", response_model=AnalyzeResponse)
+@app.post("/analyze", response_model=AnalyzeResponse, dependencies=[Depends(anahtari_dogrula)])
 async def analyze(file: UploadFile = File(...)):
     """
     Fotoğrafı analiz et: embedding çıkar + label al.
     Hem kayıp hem buldum ilanı oluşturulurken çağrılır.
     """
-    if not file.content_type.startswith("image/"):
+    if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(400, "Yalnızca görüntü dosyaları kabul edilir.")
 
     img_bytes = await file.read()
@@ -114,10 +199,12 @@ async def analyze(file: UploadFile = File(...)):
         pattern=vision["pattern"],
         colors=vision["colors"],
         model_version=MODEL_SURUMU,
+        is_designed_graphic=vision["is_designed_graphic"],
+        graphic_confidence=vision["graphic_confidence"],
     )
 
 
-@app.post("/analyze_url")
+@app.post("/analyze_url", dependencies=[Depends(anahtari_dogrula)])
 async def analyze_url(req: AnalyzeUrlRequest):
     """
     Fotoğrafları ADRESLERİNDEN indirip analiz et — üretim akışının yaptığı iş.
@@ -130,7 +217,13 @@ async def analyze_url(req: AnalyzeUrlRequest):
     altında bildirir. Hiçbiri indirilemezse hata döner.
     """
     try:
-        return await run_in_threadpool(urlleri_analiz_et, req.photo_urls)
+        sonuc = await run_in_threadpool(urlleri_analiz_et, req.photo_urls)
+        # `photo_bytes` yalnızca kuyruk.py'nin (metin analizine görsel geçirmek
+        # için) kullandığı bir ara değer, sözleşmede yok ve JSON'a çevrilemez
+        # (ham bayt listesi) -- burada bırakılırsa bu uç HER fotoğraflı
+        # çağrıda 500 verir.
+        sonuc.pop("photo_bytes", None)
+        return sonuc
     except FotografIndirilemedi as e:
         # Kaynak sunucu kaynaklı: 502 (bizim değil, dış servisin sorunu)
         raise HTTPException(502, {"code": e.KOD, "message": str(e)})
@@ -141,7 +234,7 @@ async def analyze_url(req: AnalyzeUrlRequest):
         raise HTTPException(500, {"code": "INTERNAL", "message": "Analiz sırasında hata"})
 
 
-@app.post("/compare")
+@app.post("/compare", dependencies=[Depends(anahtari_dogrula)])
 async def compare(
     file1: UploadFile = File(...),
     file2: UploadFile = File(...),
@@ -154,7 +247,7 @@ async def compare(
     """
     analyses = []
     for f in (file1, file2):
-        if not f.content_type.startswith("image/"):
+        if not f.content_type or not f.content_type.startswith("image/"):
             raise HTTPException(400, "Yalnızca görüntü dosyaları kabul edilir.")
         img_bytes = await f.read()
         if len(img_bytes) > 10 * 1024 * 1024:
@@ -178,20 +271,37 @@ async def compare(
     }
 
 
-@app.post("/match")
+@app.post("/match", dependencies=[Depends(anahtari_dogrula)])
 async def match(req: MatchRequest):
     """
-    Yeni ilan ile mevcut ilanları karşılaştır, skorla sırala.
+    Yeni ilan/external kayıt ile mevcut adayları karşılaştır, skorla sırala.
 
     Elenen adaylar `skipped_candidates` altında gerekçesiyle raporlanır —
     "hiç eşleşme çıkmadı" durumunun sebebi görünür olsun diye.
     DİKKAT: adayların `model_version` alanı bu servisin sürümüyle aynı değilse
     aday ATLANIR (farklı sürümlerin vektörleri kıyaslanamaz).
+
+    Faz 2 (Instagram entegrasyonu) — bu uç, external_pet_records için "Aşama 2"
+    eşleştirme çağrısının hedefidir: Java, Aşama 1'de (ai.analysis.request
+    kuyruğu üzerinden, adaysız) zaten üretilmiş embedding/etiket/tür bilgisini
+    buraya senkron olarak gönderir. `req.external_record_id` sorgunun kendi
+    kimliğidir (ad_id ile aynı anda dolu olamaz — bkz. models.py); adaylar da
+    kendi `ad_id`/`external_record_id` çiftini taşır. `req.match_threshold`
+    verilmezse bu servisin ortam değişkeni varsayılanı (MATCH_THRESHOLD)
+    kullanılır — native davranış hiç değişmez.
     """
     try:
-        matches, atlanan = adaylari_eslestir(
+        # run_in_threadpool: adaylari_eslestir CPU'ya bağlı (yüzlerce adayla
+        # cosine similarity) senkron bir iştir -- /analyze ve /compare aynı
+        # sebeple havuza atıyor (bkz. _goruntuyu_isle), burası da tutarlı
+        # olmalı; aksi hâlde yoğun bir /match isteği olay döngüsünü bloklar,
+        # /health bile o sırada yanıtsız kalır.
+        matches, atlanan = await run_in_threadpool(
+            adaylari_eslestir,
             embeddings=req.embeddings, labels=req.labels, species=req.species,
             candidates=req.candidates, ad_id=req.ad_id,
+            external_record_id=req.external_record_id,
+            threshold=req.match_threshold,
         )
     except Exception as e:  # sorgu vektörünün kendisi bozuksa
         logger.error(f"Eşleştirme hatası: {e}")

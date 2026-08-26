@@ -58,6 +58,67 @@ def test_sonsuz_mesafe():
     assert location_score(float("nan")) == 0.0
 
 
+def test_mesafe_bilinmiyorsa_sifir():
+    """Eksik mesafe GEÇERSİZ mesafeyle aynı davranmalı.
+
+    Eskiden `MatchCandidate.distance_km` varsayılanı 0.0 idi ve
+    `location_score(0.0)` maksimum puandır (1.0). Yani alanı hiç göndermeyen
+    çağıran, "mesafeyi bilmiyorum"un karşılığı olarak EN İYİ konum puanını
+    alıyordu.
+    """
+    assert location_score(None) == 0.0
+
+
+def test_aday_mesafesiz_kurulabilir_ve_none_olur():
+    """Varsayılan artık 0.0 değil None — "0 km" ile "bilinmiyor" ayrı şeyler."""
+    mesafesiz = MatchCandidate(ad_id=1, embeddings=[vektor()], labels=["cat"],
+                               species="cat", model_version=MODEL_SURUMU)
+    assert mesafesiz.distance_km is None
+
+
+def test_eksik_mesafe_gecersiz_mesafeyle_ayni_skoru_verir():
+    """Asıl iddia: "eksik" ile "geçersiz" AYNI yoldan geçmeli.
+
+    Ayrı bir dal açılırsa (ör. None için başka bir puan) bu eşitlik bozulur.
+    """
+    a, b = vektor(1), vektor(2)
+    mesafesiz = MatchCandidate(ad_id=1, embeddings=[b], labels=["cat"],
+                               species="cat", model_version=MODEL_SURUMU)
+
+    def skorla(mesafe):
+        return compute_final_score(a, b, ["cat"], ["cat"], mesafe, "cat", "cat")
+
+    eksik = skorla(mesafesiz.distance_km)
+    assert eksik == skorla(float("nan"))
+    assert eksik == skorla(float("inf"))
+    assert eksik["location"] == 0.0
+
+
+def test_mesafesiz_aday_gercek_eslestirme_yolundan_gecer():
+    """Skorlama fonksiyonu değil, adayı ÜRÜNDEKİ yoldan geçirir.
+
+    `adaylari_eslestir` mesafeyi `aday.distance_km` üzerinden okur; bu test o
+    aktarımı da kapsar, yoksa yalnız `compute_final_score` sınanmış olurdu.
+    """
+    mesafesiz = MatchCandidate(ad_id=7, embeddings=[vektor(3)], labels=["cat"],
+                               species="cat", model_version=MODEL_SURUMU)
+    sonuclar, _ = adaylari_eslestir(vektor(1), ["cat"], "cat", [mesafesiz],
+                                    model_version=MODEL_SURUMU)
+    assert len(sonuclar) == 1
+    assert sonuclar[0]["location"] == 0.0
+
+
+def test_acik_sifir_km_hala_maksimum():
+    """Karşıt kontrol: AÇIKÇA verilen 0.0 meşru "aynı noktada" demektir.
+
+    Düzeltme yalnız bilginin HİÇ olmadığı durumu değiştirmeli; 0 km'yi de
+    cezalandırırsa aynı sokakta bulunan hayvan puan kaybeder.
+    """
+    assert location_score(0.0) == 1.0
+    a, b = vektor(1), vektor(2)
+    assert compute_final_score(a, b, ["cat"], ["cat"], 0.0, "cat", "cat")["location"] == 1.0
+
+
 # --------------------------------------------------------------------------
 # Embedding doğrulaması
 # --------------------------------------------------------------------------
@@ -237,3 +298,52 @@ def test_hayvan_olmayan_goruntu_yakalanir():
         assert d["is_pet"] is False, f"{ad}: hayvan sanıldı"
         assert d["species"] == "unknown"
         assert d["breed"] is None, f"{ad}: hayvan değilken cins verildi"
+
+
+# --------------------------------------------------------------------------
+# "Tasarım mı, düz fotoğraf mı?" sinyali (bkz. app/attributes.py:TASARIM_PROMPTS)
+# --------------------------------------------------------------------------
+#
+# ⚠ Gerçek poster/afiş örneği YOK (bkz. docs/olcum-raporu.md §6'nın "oyuncak/
+# çizim hiç denenmedi" notuyla aynı boşluk). Bu yüzden -- tıpkı is_pet
+# kapısının gerçek negatiflerde sentetik testten çok daha kötü çıkmasında
+# olduğu gibi ("Sentetik test yanıltıcıydı", yukarıdaki test_hayvan_
+# olmayan_goruntu_yakalanir'ın bağlamı) -- burada sentetik bir görüntünün
+# "tasarım" ya da "fotoğraf" olarak DOĞRU sınıflandığını iddia eden bir test
+# YAZILMIYOR. Yalnızca sözleşme (alan var mı, tipi doğru mu, sınırlar içinde
+# mi, deterministik mi) sınanıyor -- doğruluk gerçek verilerle ayrıca
+# ölçülecek.
+
+def test_tasarim_sinyali_alan_sozlesmesi():
+    from app.attributes import attribute_analyzer
+
+    d = attribute_analyzer.analyze(jpg(Image.new("RGB", (256, 256), (128, 128, 128))))
+    assert isinstance(d["is_designed_graphic"], bool)
+    assert 0.0 <= d["graphic_confidence"] <= 1.0
+
+
+def test_tasarim_sinyali_deterministik():
+    """Aynı görüntü iki kez analiz edilirse aynı sonucu vermeli -- diğer
+    tüm zero-shot sinyaller gibi (bkz. test_same_photo_same_labels,
+    tests/test_attributes.py)."""
+    from app.attributes import attribute_analyzer
+
+    img = jpg(Image.new("RGB", (256, 256), (90, 140, 60)))
+    d1 = attribute_analyzer.analyze(img)
+    d2 = attribute_analyzer.analyze(img)
+    assert d1["is_designed_graphic"] == d2["is_designed_graphic"]
+    assert d1["graphic_confidence"] == d2["graphic_confidence"]
+
+
+def test_tasarim_sinyali_diger_alanlari_etkilemiyor():
+    """Yeni sinyal BİLGİ AMAÇLI eklendi -- is_pet/species/breed kararlarını
+    değiştirmemeli (bkz. app/attributes.py:analyze()'in bu alanla ilgili
+    yorumu: ne is_pet/species kapısını, ne eşleştirmeyi etkiler)."""
+    from app.attributes import attribute_analyzer
+
+    d = attribute_analyzer.analyze(jpg(Image.new("RGB", (256, 256), (128, 128, 128))))
+    # Bu sabit gri görüntü için beklenen davranış zaten test_hayvan_olmayan_
+    # goruntu_yakalanir'da doğrulanıyor -- burada yalnızca yeni alanın
+    # VARLIĞININ bu kararı bozmadığını doğruluyoruz.
+    assert d["is_pet"] is False
+    assert d["species"] == "unknown"

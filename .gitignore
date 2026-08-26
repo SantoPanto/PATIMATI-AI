@@ -1,5 +1,6 @@
 # Python
 venv/
+.venv/
 __pycache__/
 *.pyc
 .pytest_cache/
@@ -24,3 +25,7 @@ tests/gercek_veri/
 
 # Olcum veri kumeleri (halka acik, indirilebilir - depoya girmez)
 data/
+
+# scripts/train.py + scripts/evaluate_baseline.py çıktıları: model checkpoint'leri
+# (best_model.pth / last_model.pth) GB mertebesinde — depoya asla girmemeli.
+outputs/

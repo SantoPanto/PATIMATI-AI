@@ -7,14 +7,12 @@ import torch
 from PIL import Image, ImageOps
 from transformers import CLIPModel, CLIPProcessor
 
+from .gorsel_sabitleri import ASGARI_KENAR
 from .hatalar import GecersizGoruntu
+from .kirpma import CROP_TO_ANIMAL, hayvana_kirp
 from .surum import _SECIM
 
 logger = logging.getLogger(__name__)
-
-# Bundan küçük görüntüler anlamlı bir vektör üretmez (1x1 bile sessizce
-# 512'lik bir vektör döndürüyordu — çöp veriyi veritabanına yazmayalım).
-ASGARI_KENAR = 32
 
 # PIL'in varsayılan "decompression bomb" sınırı ~89 megapiksel; bu, RGB olarak
 # ~268 MB bellek demek ve küçük bir konteyneri öldürür. 40 MP fazlasıyla yeterli.
@@ -34,6 +32,10 @@ def goruntu_ac(image_bytes: bytes) -> Image.Image:
       2. Şeffaflığı BEYAZ zemine yerleştirir — düz RGB'ye çevirmek şeffaf
          alanları siyaha çevirip renk analizini bozuyordu.
       3. Çok küçük görüntüleri reddeder.
+      4. (CROP_TO_ANIMAL=true iken, VARSAYILAN KAPALI) tespit edilen kedi/
+         köpek bölgesine kırpar — bkz. app/kirpma.py'nin docstring'i. Bu
+         adım kasıtlı olarak min-boyut kontrolünden SONRA gelir: reddedilecek
+         kadar küçük bir görüntüye dedektörü hiç çalıştırmaya gerek yok.
     """
     try:
         img = Image.open(io.BytesIO(image_bytes))
@@ -54,6 +56,9 @@ def goruntu_ac(image_bytes: bytes) -> Image.Image:
         raise GecersizGoruntu(
             f"Görüntü çok küçük: {img.size[0]}x{img.size[1]} "
             f"(en az {ASGARI_KENAR}x{ASGARI_KENAR} olmalı)")
+
+    if CROP_TO_ANIMAL:
+        img = hayvana_kirp(img)
     return img
 
 
@@ -110,16 +115,17 @@ class KimlikGomucu:
     bu sınıf ise yalnızca kimlik vektörünü. Ölçümle ayrıldılar — kimlik için
     ince ayarlanmış modeller etiket işini yapamıyor (bkz. app/surum.py başlığı).
 
-    Seçim `KIMLIK_MODEL` ortam değişkeniyle yapılır. Varsayılan "clip" ise
-    AYRI BİR MODEL YÜKLENMEZ; etiketçi CLIP kimlik için de kullanılır, ek bellek
-    maliyeti sıfır olur ve davranış eskisiyle birebir aynı kalır.
+    Seçim `KIMLIK_MODEL` ortam değişkeniyle yapılır; varsayılanı app/surum.py
+    tutuyor ("siglip2-animal"). "clip" SEÇİLİYSE ayrı bir model YÜKLENMEZ;
+    etiketçi CLIP kimlik için de kullanılır, ek bellek maliyeti sıfır olur.
+    Diğer seçeneklerde süreç başına İKİ model yüklenir.
     """
 
     def __init__(self, secim: dict, etiketci: PetEmbedder):
         self.boyut = secim["boyut"]
         # "clip" seçiliyse ikinci bir model yüklemenin anlamı yok
-        self._clip_mi = secim["kimlik"] == etiketci.MODEL_ID
-        if self._clip_mi:
+        self.clip_mi = secim["kimlik"] == etiketci.MODEL_ID
+        if self.clip_mi:
             self._etiketci = etiketci
             logger.info("Kimlik vektörü etiketçi CLIP'ten alınacak (ek model yok).")
             return
@@ -185,7 +191,7 @@ class KimlikGomucu:
         return model
 
     def embed_bytes(self, image_bytes: bytes) -> list[float]:
-        if self._clip_mi:
+        if self.clip_mi:
             return self._etiketci.embed_bytes(image_bytes)
         return self._embed_pil(goruntu_ac(image_bytes))
 
