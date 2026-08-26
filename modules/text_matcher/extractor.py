@@ -17,8 +17,9 @@ class PatiMatiTextExtractor:
         }
 
     def _normalize_text(self, text: str) -> str:
-        text = text.lower()
+        # Büyük harf düzeltmeleri lower() fonksiyonundan ÖNCE yapılmalı
         text = text.replace("İ", "i").replace("I", "ı")
+        text = text.lower()
         return text
 
     def extract_features(self, description: str) -> dict:
@@ -43,13 +44,10 @@ class PatiMatiTextExtractor:
                 features["detay_irk"] = "tekir"
 
         # Tasma analizi (Olumsuzluk kontrolü dahil: "tasması yok" vb.)
+        # Tasma analizi (Olumsuzluk kontrolü dahil)
         if "tasma" in desc:
-            if re.search(r'\b(tasma[s]?\s+yok|tasma\s+bulunmu[y]?or|tasma[s]?\s+de[g]?il)\b', desc):
+            if re.search(r'\b(tasma[s]?\s+yok|tasma\s+bulunmu[y]?or|tasma[s]?\s+de[gğ]?il)\b', desc):
                 features["tasma"] = "yok"
-            else:
-                renkler = ["mavi", "kırmızı", "siyah", "yeşil", "pembe"]
-                bulunan_renk = next((r for r in renkler if r in desc), "var")
-                features["tasma"] = bulunan_renk
 
         # Kulak / Çentik analizi
         if any(k in desc for k in ["çentik", "çentikli", "küpe", "küpeli"]):
