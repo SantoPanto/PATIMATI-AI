@@ -7,13 +7,13 @@ import re
 
 class PatiMatiTextExtractor:
     def __init__(self):
-        # Eş anlamlı kelime normalizasyon sözlüğü
+        # Eş anlamlı kelime normalizasyon sözlüğü (ünsüz yumuşamaları dahil)
         self.synonyms = {
             "kedi": ["kedi", "kedicik", "pisi", "kedisi"],
-            "köpek": ["köpek", "köpüş", "cıncık"],
+            "köpek": ["köpek", "köpüş", "cıncık", "köpeği", "köpeğimiz", "köpeğin"],
             "tekir": ["tekir", "bozkır", "çizgili"],
-            "tasma": ["tasma", "tasmali", "tasmalar"],
-            "küpe": ["küpe", "küpeli", "çentik", "kulak çentiği"]
+            "tasma": ["tasma", "tasmali", "tasmalar", "tasmasız"],
+            "küpe": ["küpe", "küpeli", "çentik", "çentiği", "kulak çentiği"]
         }
 
     def _normalize_text(self, text: str) -> str:
@@ -43,15 +43,18 @@ class PatiMatiTextExtractor:
             if variants in desc:
                 features["detay_irk"] = "tekir"
 
-        # Tasma analizi (Olumsuzluk kontrolü dahil: "tasması yok" vb.)
-        # Tasma analizi (Olumsuzluk kontrolü dahil)
-        if "tasma" in desc:
-            if re.search(r'\b(tasma[s]?\s+yok|tasma\s+bulunmu[y]?or|tasma[s]?\s+de[gğ]?il)\b', desc):
+        # Tasma analizi (Genişletilmiş olumsuzluk ve ek kontrolleri: "tasmasız", "tasmasından eser yok" vb.)
+        if any(t in desc for t in ["tasma", "tasmali", "tasmasız"]):
+            if re.search(r'\b(tasma[s]?\s*yok|tasma\s*bulunmu[y]?or|tasma[s]?\s*de[gğ]?il|tasmasız|tasma[s]?ndan\s+eser\s+yok)\b', desc):
                 features["tasma"] = "yok"
+            else:
+                renkler = ["mavi", "kırmızı", "siyah", "yeşil", "pembe"]
+                bulunan_renk = next((r for r in renkler if r in desc), "var")
+                features["tasma"] = bulunan_renk
 
-        # Kulak / Çentik analizi
-        if any(k in desc for k in ["çentik", "çentikli", "küpe", "küpeli"]):
-            if re.search(r'\b(çentik\s+yok|küpe\s+yok)\b', desc):
+        # Kulak / Çentik analizi (Ünsüz yumuşaması dahil: "çentiği")
+        if any(k in desc for k in ["çentik", "çentiği", "çentikli", "küpe", "küpeli"]):
+            if re.search(r'\b(çentik\s*yok|çentiği\s*yok|küpe\s*yok)\b', desc):
                 features["kulak"] = "normal"
             else:
                 features["kulak"] = "çentikli/küpeli"
