@@ -1,7 +1,6 @@
 import json
 import os
 from extractor import PatiMatiTextExtractor
-
 TEST_DATASET = [
     {"text": "Bahçede bulduk, gri tekir kedi, boynunda mavi tasması var.", "expected": {"tur": "kedi", "detay_irk": "tekir", "tasma": "mavi", "kulak": "Bilinmiyor"}},
     {"text": "Sokakta geziyordu, siyah kedicik, tasması yok.", "expected": {"tur": "kedi", "detay_irk": "Bilinmiyor", "tasma": "yok", "kulak": "Bilinmiyor"}},
@@ -20,7 +19,7 @@ TEST_DATASET = [
     {"text": "Tekir kedi, kulak çentiği var.", "expected": {"tur": "kedi", "detay_irk": "tekir", "tasma": "Bilinmiyor", "kulak": "çentikli/küpeli"}},
     {"text": "Bahçedeki kedi kedicik.", "expected": {"tur": "kedi", "detay_irk": "Bilinmiyor", "tasma": "Bilinmiyor", "kulak": "Bilinmiyor"}},
     {"text": "Sahipsiz köpek, üzerinde tasma bulunmuyor.", "expected": {"tur": "köpek", "detay_irk": "Bilinmiyor", "tasma": "yok", "kulak": "Bilinmiyor"}},
-    {"text": "Gri tekir, tasmasız.", "expected": {"tur": "kedi", "detay_irk": "tekir", "tasma": "Bilinmiyor", "kulak": "Bilinmiyor"}},
+    {"text": "Gri tekir, tasmasız.", "expected": {"tur": "kedi", "detay_irk": "tekir", "tasma": "yok", "kulak": "Bilinmiyor"}},
     {"text": "Kırmızı tasmalı tatlı kedi.", "expected": {"tur": "kedi", "detay_irk": "Bilinmiyor", "tasma": "kırmızı", "kulak": "Bilinmiyor"}},
     {"text": "Büyük köpek, kulakları küpeli.", "expected": {"tur": "köpek", "detay_irk": "Bilinmiyor", "tasma": "Bilinmiyor", "kulak": "çentikli/küpeli"}},
     {"text": "Pisi pisi, yeşil tasması var.", "expected": {"tur": "kedi", "detay_irk": "Bilinmiyor", "tasma": "yeşil", "kulak": "Bilinmiyor"}},
@@ -28,7 +27,24 @@ TEST_DATASET = [
     {"text": "Sokak köpeği, tasması mevcut değil.", "expected": {"tur": "köpek", "detay_irk": "Bilinmiyor", "tasma": "yok", "kulak": "Bilinmiyor"}},
     {"text": "Siyah tekir kedi.", "expected": {"tur": "kedi", "detay_irk": "tekir", "tasma": "Bilinmiyor", "kulak": "Bilinmiyor"}},
     {"text": "Mavi tasmalı köpek.", "expected": {"tur": "köpek", "detay_irk": "Bilinmiyor", "tasma": "mavi", "kulak": "Bilinmiyor"}},
-    {"text": "Kulak çentiği bulunan tekir.", "expected": {"tur": "kedi", "detay_irk": "tekir", "tasma": "Bilinmiyor", "kulak": "çentikli/küpeli"}}
+    {"text": "Kulak çentiği bulunan tekir.", "expected": {"tur": "kedi", "detay_irk": "tekir", "tasma": "Bilinmiyor", "kulak": "çentikli/küpeli"}},
+    # Yeni eklenen gerçek ilan dili örnekleri (27 - 42):
+    {"text": "Kahverengi tasmalı sevimli kedi kayıp.", "expected": {"tur": "kedi", "detay_irk": "Bilinmiyor", "tasma": "kahverengi", "kulak": "Bilinmiyor"}},
+    {"text": "Küçük köpeğimizin kulağında çentik var, boynunda tasma yok.", "expected": {"tur": "köpek", "detay_irk": "Bilinmiyor", "tasma": "yok", "kulak": "çentikli/küpeli"}},
+    {"text": "Tekir kedi, kulak çentiği yok.", "expected": {"tur": "kedi", "detay_irk": "tekir", "tasma": "Bilinmiyor", "kulak": "normal"}},
+    {"text": "Sokakta bulduk sarı pisi, tasması da var.", "expected": {"tur": "kedi", "detay_irk": "Bilinmiyor", "tasma": "var", "kulak": "Bilinmiyor"}},
+    {"text": "Beyaz tasmalı büyük bir köpek.", "expected": {"tur": "köpek", "detay_irk": "Bilinmiyor", "tasma": "beyaz", "kulak": "Bilinmiyor"}},
+    {"text": "Tasmasından eser olmayan tekir pisi.", "expected": {"tur": "kedi", "detay_irk": "tekir", "tasma": "yok", "kulak": "Bilinmiyor"}},
+    {"text": "Küpeli ve sarı tasmalı köpek.", "expected": {"tur": "köpek", "detay_irk": "Bilinmiyor", "tasma": "sarı", "kulak": "çentikli/küpeli"}},
+    {"text": "Gri kedi, kulaklarında çentik mevcut.", "expected": {"tur": "kedi", "detay_irk": "Bilinmiyor", "tasma": "Bilinmiyor", "kulak": "çentikli/küpeli"}},
+    {"text": "Kayıp tatlı köpüş, tasmasi bulunmuyor.", "expected": {"tur": "köpek", "detay_irk": "Bilinmiyor", "tasma": "yok", "kulak": "Bilinmiyor"}},
+    {"text": "Pembe tasmalı tekir kedi.", "expected": {"tur": "kedi", "detay_irk": "tekir", "tasma": "pembe", "kulak": "Bilinmiyor"}},
+    {"text": "Kulak çentiği ve kırmızı tasması var.", "expected": {"tur": "Bilinmiyor", "detay_irk": "Bilinmiyor", "tasma": "kırmızı", "kulak": "çentikli/küpeli"}},
+    {"text": "Tasmasız ve kulakları normal sokak kedisi.", "expected": {"tur": "kedi", "detay_irk": "Bilinmiyor", "tasma": "yok", "kulak": "normal"}},
+    {"text": "Acil araniyor: Siyah tasmalı tekir kedi.", "expected": {"tur": "kedi", "detay_irk": "tekir", "tasma": "siyah", "kulak": "Bilinmiyor"}},
+    {"text": "Kulak çentiği olan köpek, tasmasız.", "expected": {"tur": "köpek", "detay_irk": "Bilinmiyor", "tasma": "yok", "kulak": "çentikli/küpeli"}},
+    {"text": "Mavi tasmalı tekir cinsi kedi.", "expected": {"tur": "kedi", "detay_irk": "tekir", "tasma": "mavi", "kulak": "Bilinmiyor"}},
+    {"text": "Küpeli pisi, tasması yok.", "expected": {"tur": "kedi", "detay_irk": "Bilinmiyor", "tasma": "yok", "kulak": "çentikli/küpeli"}}
 ]
 
 def run_evaluation():
