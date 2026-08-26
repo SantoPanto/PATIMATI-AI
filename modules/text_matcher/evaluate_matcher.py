@@ -1,6 +1,9 @@
 import json
 import os
-from modules.text_matcher.extractor import PatiMatiTextExtractor
+try:
+    from modules.text_matcher.extractor import PatiMatiTextExtractor
+except ImportError:
+    from extractor import PatiMatiTextExtractor
 TEST_DATASET = [
     {"text": "Bahçede bulduk, gri tekir kedi, boynunda mavi tasması var.", "expected": {"tur": "kedi", "detay_irk": "tekir", "tasma": "mavi", "kulak": "Bilinmiyor"}},
     {"text": "Sokakta geziyordu, siyah kedicik, tasması yok.", "expected": {"tur": "kedi", "detay_irk": "Bilinmiyor", "tasma": "yok", "kulak": "Bilinmiyor"}},
