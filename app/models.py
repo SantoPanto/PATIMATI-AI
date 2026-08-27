@@ -194,3 +194,21 @@ class TextAnalysisResult(BaseModel):
     distinguishing_features: str | None = None
     pet_count: int | None = None
     needs_review: bool = False
+
+
+class InstagramCaptionRequest(BaseModel):
+    """`app/instagram_caption.py::instagram_caption_olustur()`'a giden
+    istek gövdesi -- Java tarafı Ad entity'sinden doldurur. Kişisel veri
+    (telefon/e-posta/tam adres) ASLA gönderilmemeli (bkz. instagram_caption_prompt.py).
+    """
+    ilan_turu: str            # "LOST" | "FOUND" | "ADOPTION" (Ad.AdType adı)
+    tur: str                  # "Kedi" | "Köpek"
+    irk: str | None = None
+    renkler: str | None = None
+    il_ilce: str | None = None
+    aciklama: str | None = None
+    ayirt_edici: list[str] = Field(default_factory=list)
+
+
+class InstagramCaptionResponse(BaseModel):
+    caption: str | None = None

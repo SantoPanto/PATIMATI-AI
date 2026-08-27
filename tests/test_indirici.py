@@ -145,11 +145,20 @@ def test_liste_doluyken_listede_olmayan_alan_adi_reddedilir(monkeypatch):
 
 def test_media_patimati_me_beyaz_listede_ve_dogrulanir(monkeypatch):
     """Production medya domainimiz media.patimati.me listedeyken doğrulama başarılı olmalı,
-    farklı domainler engellenmeye devam etmeli."""
+    farklı domainler engellenmeye devam etmeli.
+
+    Bu dosyadaki diğer testler gibi ağa çıkmaz: DNS çözümü, gerçek (ve genel)
+    bir IP'ye sahte döndürülerek mock'lanır. Gerçek DNS'e bağımlı olsaydı,
+    DNS/ağ kesintisi olan bir ortamda (ör. CI, sandbox) bu test rastgele
+    başarısız olur, davranışın kendisiyle ilgisi olmayan bir sebeple derlemeyi
+    kırardı.
+    """
     monkeypatch.setattr(indirici, "IZINLI_HOSTLAR", ["media.patimati.me"])
-    # media.patimati.me HTTPS adresi doğrulamadan geçmeli (DNS çözümü ile)
+    monkeypatch.setattr(
+        indirici.socket, "getaddrinfo",
+        lambda host, port: [(indirici.socket.AF_INET, None, None, "", ("203.0.113.10", 0))])
     indirici.dogrula("https://media.patimati.me/ads/2026/08/b77ea941-0f06-4fdd-8291-898018f9ec4c.jpg")
-    
+
     # Beyaz listede olmayan başka rastgele domain reddedilmeli
     with pytest.raises(FotografIndirilemedi, match="beyaz listede değil"):
         indirici.dogrula("https://rastgele-site.com/ads/test.jpg")
