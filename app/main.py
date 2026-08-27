@@ -196,6 +196,7 @@ async def analyze(file: UploadFile = File(...)):
         species_confidence=vision["species_confidence"],
         is_pet=vision["is_pet"],
         breed=vision["breed"],
+        breed_top=vision["breed_top"],
         breed_confidence=vision["breed_confidence"],
         pattern=vision["pattern"],
         colors=vision["colors"],

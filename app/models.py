@@ -10,6 +10,7 @@ class AnalyzeResponse(BaseModel):
     species_confidence: float = 0.0
     is_pet: bool = True             # False → fotoğrafta kedi/köpek görünmüyor
     breed: str | None = None        # Güven eşiğinin altındaysa None
+    breed_top: str | None = None    # Eşikten bağımsız en iyi tahmin adı (öneri dolumu); hayvan değilse None
     breed_confidence: float = 0.0
     pattern: str | None = None      # tabby | spotted | solid | bicolor | unknown
     colors: list[dict]              # Dominant renkler

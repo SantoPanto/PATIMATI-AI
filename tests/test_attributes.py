@@ -71,6 +71,17 @@ def test_breed_esik_altinda_isim_dondurmez():
         assert d["breed_confidence"] >= attribute_analyzer.BREED_MIN_PROB
 
 
+def test_breed_top_esikten_bagimsiz_dolu():
+    """breed eşik altında None olsa da breed_top EN İYİ tahminin adını taşır
+    (ilan formunun düşük güvenli öneri dolumu, 2026-08-27 S5). Hayvansa
+    breed_top boş kalmamalı; breed doluysa ikisi aynı isim olmalı."""
+    d = _analyze(next((SEED / "class_25").glob("*.jpg")))
+    if d["is_pet"]:
+        assert d["breed_top"], "hayvan fotoğrafında breed_top boş dönmemeli"
+        if d["breed"] is not None:
+            assert d["breed"] == d["breed_top"]
+
+
 def test_same_photo_same_labels():
     # Aynı fotoğraf iki kez analiz edilirse etiketler birebir aynı olmalı (Jaccard tutarlılığı)
     p = next((SEED / "class_05").glob("*.jpg"))
