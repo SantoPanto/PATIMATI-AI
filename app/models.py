@@ -209,6 +209,13 @@ class PetReportResult(BaseModel):
     kalır (prompt'un kendi kuralı) -- burada da bilerek hepsi opsiyonel.
     """
     gecerli: bool
+    # Sınıflandırıcıdan gelen, prompt'a giden ÇEVRİLMİŞ kimlik bağlamı --
+    # LLM üretmez, pet_raporu_olustur() doldurur (bkz. oradaki model_copy).
+    # Frontend "Sen bir Köpeksin -- Golden Retriever!" başlığını buradan
+    # kurar. Erken dönüşte (KEDI_KOPEK_DEGIL) üçü de None kalır.
+    tur: str | None = None          # "Kedi" | "Köpek"
+    irk: str | None = None          # cins adı ya da "BELIRLENEMEDI"
+    desen: str | None = None        # tabby|spotted|solid|bicolor ya da "BELIRLENEMEDI"
     # Yalnızca prompt'un ALAN KURALLARI'ndaki 6 sabit değerden biri OLMALI;
     # ayrıca pet_raporu.py'nin KENDİ ürettiği, LLM'e hiç gitmeyen dahili bir
     # sebep de olabilir ("SERVIS_KULLANILAMIYOR" -- sağlayıcı yapılandırılmamış

@@ -334,5 +334,11 @@ def pet_raporu_olustur(image_bytes: bytes, *, species: str, breed: str | None,
     irk = breed if breed else _BELIRLENEMEDI
     desen = pattern if (pattern and pattern != "unknown") else _BELIRLENEMEDI
 
-    return get_pet_report_analyzer().analyze(
+    rapor = get_pet_report_analyzer().analyze(
         image_bytes, tur=tur, irk=irk, desen=desen, kullanici_notu=kullanici_notu)
+
+    # Kimlik bağlamı cevapta da taşınır (bkz. models.PetReportResult.tur):
+    # bunlar LLM'in ürettiği alanlar değil, prompt'a giden çevrilmiş girdiler.
+    # Sağlayıcı başarısız olsa da (gecerli=False) doldurulur -- sınıflandırıcı
+    # sonucu elimizde, en azından tür/ırk başlığı gösterilebilir.
+    return rapor.model_copy(update={"tur": tur, "irk": irk, "desen": desen})

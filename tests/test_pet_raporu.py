@@ -466,3 +466,51 @@ def test_kalici_400_hatasi_hic_yeniden_denenmez(monkeypatch):
     assert uykular == []
     assert sonuc.gecerli is False
     assert sonuc.hata_nedeni == "SERVIS_KULLANILAMIYOR"
+
+
+# --------------------------------------------------------------------------
+# Kimlik alanları (tur/irk/desen) -- cevapta taşınıyor mu (2026-08-27 eki)
+# --------------------------------------------------------------------------
+
+def test_kimlik_alanlari_cevapta_tasiniyor(monkeypatch):
+    """FE başlığı ("Sen bir Köpeksin -- Pug!") sınıflandırıcı kimliğini
+    /analyze_pet cevabından okur; LLM raporuna eklenmiş çevrilmiş girdiler
+    kaybolursa bu test düşer."""
+    monkeypatch.setenv("PET_REPORT_AI_PROVIDER", "ornek-saglayici")
+    monkeypatch.setenv("PET_REPORT_AI_ENDPOINT", "https://ornek.test/v1/analyze")
+    monkeypatch.setenv("PET_REPORT_AI_API_KEY", "sahte-anahtar")
+
+    def _sahte_analyze(self, image_bytes, tur, irk, desen, kullanici_notu=None):
+        from app.models import PetReportResult
+        return PetReportResult(gecerli=True)
+
+    monkeypatch.setattr(HttpPetReportAnalyzer, "analyze", _sahte_analyze)
+
+    sonuc = pet_raporu_olustur(b"\xff\xd8\xff", species="dog", breed="Pug",
+                               pattern=None, is_pet=True)
+
+    assert (sonuc.tur, sonuc.irk, sonuc.desen) == ("Köpek", "Pug", "BELIRLENEMEDI")
+
+
+def test_saglayici_dusse_de_kimlik_alanlari_dolu(monkeypatch):
+    """Sağlayıcı başarısız olsa bile (gecerli=False) sınıflandırıcı kimliği
+    elimizde -- FE en azından tür/ırk başlığını gösterebilmeli."""
+    monkeypatch.delenv("PET_REPORT_AI_PROVIDER", raising=False)  # NullAnalyzer
+
+    sonuc = pet_raporu_olustur(b"\xff\xd8\xff", species="cat", breed=None,
+                               pattern="tabby", is_pet=True)
+
+    assert sonuc.gecerli is False
+    assert (sonuc.tur, sonuc.irk, sonuc.desen) == ("Kedi", "BELIRLENEMEDI", "tabby")
+
+
+def test_erken_donuste_kimlik_alanlari_bos(monkeypatch):
+    """KEDI_KOPEK_DEGIL erken dönüşünde tür güvenilir değil -- alanlar None
+    kalmalı, yanlış bir "Kedi" başlığı kurulmamalı."""
+    monkeypatch.delenv("PET_REPORT_AI_PROVIDER", raising=False)
+
+    sonuc = pet_raporu_olustur(b"\xff\xd8\xff", species="bird", breed=None,
+                               pattern=None, is_pet=True)
+
+    assert sonuc.gecerli is False
+    assert sonuc.tur is None and sonuc.irk is None and sonuc.desen is None
