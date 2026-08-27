@@ -172,6 +172,64 @@ class MatchResult(BaseModel):
     photo_b: int | None = None
 
 
+class PetDegerGuven(BaseModel):
+    """{deger, guven} ikilisini taşıyan alanlar için ortak şekil
+    (renk_tarifi, goz_rengi) -- pet_raporu.py'nin ürettiği rapor."""
+    deger: str
+    guven: float = 0.0
+
+
+class PetYasTahmini(BaseModel):
+    aralik: str                 # "4-6 ay" | "2-4 yaş" (bkz. prompt: YAŞ FORMATI)
+    yasam_evresi: str           # "Yavru" | "Genç" | "Yetişkin" | "Yaşlı"
+    guven: float = 0.0
+
+
+class PetCinsiyetTahmini(BaseModel):
+    tahmin: str                 # "Erkek" | "Dişi" | "Belirsiz"
+    guven: float = 0.0
+
+
+class PetBoyutTahmini(BaseModel):
+    deger: str
+    guven: float = 0.0
+
+
+class PetBakimIpuclari(BaseModel):
+    beslenme: str | None = None
+    tuy_bakimi: str | None = None
+    aktivite: str | None = None
+
+
+class PetReportResult(BaseModel):
+    """`app/pet_raporu.py::PetReportAnalyzer.analyze()` çıktısı.
+
+    Alan adları/anlamları `app/pet_raporu_prompt.py`'deki ÇIKTI FORMATI ile
+    birebir eşleşir. `gecerli=False` ise diğer tüm analiz alanları None/boş
+    kalır (prompt'un kendi kuralı) -- burada da bilerek hepsi opsiyonel.
+    """
+    gecerli: bool
+    # Yalnızca prompt'un ALAN KURALLARI'ndaki 6 sabit değerden biri OLMALI;
+    # ayrıca pet_raporu.py'nin KENDİ ürettiği, LLM'e hiç gitmeyen dahili bir
+    # sebep de olabilir ("SERVIS_KULLANILAMIYOR" -- sağlayıcı yapılandırılmamış
+    # ya da çağrı başarısız oldu). Bu yüzden bilerek Literal değil, düz str.
+    hata_nedeni: str | None = None
+    irka_ozel_icerik: bool | None = None
+    renk_tarifi: PetDegerGuven | None = None
+    goz_rengi: PetDegerGuven | None = None
+    tahmini_yas: PetYasTahmini | None = None
+    cinsiyet: PetCinsiyetTahmini | None = None
+    tahmini_boyut: PetBoyutTahmini | None = None
+    ayirt_edici_isaretler: list[str] = Field(default_factory=list)
+    genel_durum_gozlemi: str | None = None
+    karakter_profili: str | None = None
+    sasirtici_bilgiler: list[str] = Field(default_factory=list)
+    dikkat_edilmesi_gerekenler: list[str] = Field(default_factory=list)
+    bakim_ipuclari: PetBakimIpuclari | None = None
+    ek_hayvanlar: str | None = None
+    goruntu_kalite_notu: str | None = None
+
+
 class TextAnalysisResult(BaseModel):
     """`app/metin_analiz.py::TextAnalyzer.analyze()` çıktısı.
 

@@ -16,7 +16,8 @@ from .attributes import attribute_analyzer
 from .embedder import PetEmbedder, embedder, kimlik_gomucu
 from .hatalar import AIHatasi, FotografIndirilemedi, GecersizGoruntu
 from .matcher import MATCH_THRESHOLD, adaylari_eslestir, compute_final_score
-from .models import AnalyzeResponse, AnalyzeUrlRequest, MatchRequest
+from .models import AnalyzeResponse, AnalyzeUrlRequest, MatchRequest, PetReportResult
+from .pet_raporu import pet_raporu_olustur
 from .surum import MODEL_SURUMU, SECILEN_KIMLIK, VEKTOR_BOYUTU
 
 logging.basicConfig(level=logging.INFO)
@@ -269,6 +270,38 @@ async def compare(
         "aciklama": ("ESLESME: bildirim giderdi (skor >= esik)" if result["match"]
                      else "eslesme yok (0.50+ ise aday listesinde yine gorunurdu)"),
     }
+
+
+@app.post("/analyze_pet", response_model=PetReportResult, dependencies=[Depends(anahtari_dogrula)])
+async def analyze_pet(file: UploadFile = File(...), kullanici_notu: str | None = Form(None)):
+    """
+    Tek bir kedi/köpek fotoğrafından zengin, anlatı ağırlıklı bir "pet raporu"
+    üretir (karakter profili, bakım ipuçları, şaşırtıcı bilgiler...) --
+    `/analyze`'in ürettiği tür/ırk/desen etiketlerini VERİ olarak kullanır,
+    tekrar üretmez (bkz. app/pet_raporu.py, app/pet_raporu_prompt.py).
+
+    Sınıflandırıcı türü kedi/köpek olarak belirleyemezse (`species` "cat"/"dog"
+    dışında ya da `is_pet=False`) LLM'e hiç gidilmez -- `gecerli=False` ile
+    erken döner (bkz. pet_raporu_olustur).
+    """
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(400, "Yalnızca görüntü dosyaları kabul edilir.")
+
+    img_bytes = await file.read()
+    if len(img_bytes) > 10 * 1024 * 1024:  # 10 MB limit
+        raise HTTPException(413, "Dosya boyutu 10 MB'ı aşıyor.")
+
+    vision = await run_in_threadpool(_oznitelik_cikar, img_bytes, None)
+
+    # pet_raporu_olustur (ve içindeki HttpPetReportAnalyzer) senkron httpx
+    # kullanıyor -- _goruntuyu_isle'nin CLIP çıkarımını havuza taşımasıyla
+    # AYNI sebep: doğrudan `await` edilirse olay döngüsü, sağlayıcı yanıt
+    # verene (+ olası retry backoff'una) kadar TAMAMEN bloke olur.
+    return await run_in_threadpool(
+        pet_raporu_olustur, img_bytes,
+        species=vision["species"], breed=vision["breed"], pattern=vision["pattern"],
+        is_pet=vision["is_pet"], kullanici_notu=kullanici_notu,
+    )
 
 
 @app.post("/match", dependencies=[Depends(anahtari_dogrula)])
