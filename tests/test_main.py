@@ -60,7 +60,8 @@ def vektor(seed=0):
 
 def sahte_oznitelik(**degisiklikler):
     d = {"labels": ["cat", "tabby"], "species": "cat", "species_confidence": 0.95,
-         "is_pet": True, "breed": "Tekir", "breed_confidence": 0.81,
+         "is_pet": True, "breed": "Tekir", "breed_top": "Tekir",
+         "breed_confidence": 0.81,
          "pattern": "tabby", "colors": [{"r": 100, "g": 80, "b": 60, "score": 0.4}],
          "is_designed_graphic": False, "graphic_confidence": 0.02}
     d.update(degisiklikler)
@@ -114,6 +115,8 @@ def test_analyze_basarili_yanit_sekli(sahte_model):
     body = r.json()
     assert len(body["embedding"]) == VEKTOR_BOYUTU
     assert body["species"] == "cat"
+    # breed_top /analyze cevabında da taşınmalı (S5 -- eşikten bağımsız öneri)
+    assert body["breed_top"] == "Tekir"
     assert body["model_version"] == MODEL_SURUMU
 
 
