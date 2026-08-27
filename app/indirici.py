@@ -11,6 +11,8 @@ Korumalar:
   - şema kısıtı (varsayılan yalnızca https)
   - alan adı beyaz listesi (PHOTO_ALLOWED_HOSTS) — **boşsa hiçbir şey inmez**
   - özel/yerel IP engeli (10.x, 192.168.x, 127.x, 169.254.x, ::1 ...)
+  - DNS rebinding koruması: doğrulanan IP'ye pinlenerek bağlanılır, ikinci
+    bir çözümleme yapılmaz (bkz. indir() içindeki açıklama)
   - yönlendirme takip edilmez (her sıçrama yeniden doğrulanamayacağı için)
   - indirme sırasında boyut sınırı (Content-Length'e güvenilmez)
   - zaman aşımı
@@ -19,7 +21,7 @@ import ipaddress
 import logging
 import os
 import socket
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 
@@ -56,13 +58,18 @@ def _acikca_izinli(host: str) -> bool:
     return False
 
 
-def _ip_denetle(host: str, acik_izinli: bool) -> None:
-    """Adresin çözüldüğü IP'leri denetler."""
+def _ip_denetle(host: str, acik_izinli: bool) -> list[str]:
+    """Adresin çözüldüğü IP'leri denetler ve doğrulanan IP'lerin listesini döner.
+
+    Dönen liste, DNS rebinding'e karşı bağlantıyı pinlemek için `indir()`
+    tarafından kullanılır (bkz. oradaki açıklama).
+    """
     try:
         kayitlar = socket.getaddrinfo(host, None)
     except socket.gaierror as e:
         raise FotografIndirilemedi(f"Adres çözülemedi: {host}") from e
 
+    dogrulanan_ipler: list[str] = []
     for kayit in kayitlar:
         ip = ipaddress.ip_address(kayit[4][0])
 
@@ -78,13 +85,23 @@ def _ip_denetle(host: str, acik_izinli: bool) -> None:
             if acik_izinli:
                 logger.info("Yerel adrese izin verildi (beyaz listede): %s -> %s",
                             host, ip)
+                dogrulanan_ipler.append(str(ip))
                 continue
             raise FotografIndirilemedi(
                 f"Yerel/özel ağ adresi reddedildi: {host} -> {ip}")
+        else:
+            dogrulanan_ipler.append(str(ip))
+
+    if not dogrulanan_ipler:
+        raise FotografIndirilemedi(f"Adres için geçerli IP bulunamadı: {host}")
+    return dogrulanan_ipler
 
 
-def dogrula(url: str) -> None:
-    """İndirmeden ÖNCE adresi denetler; uygun değilse hata fırlatır."""
+def dogrula(url: str) -> str:
+    """İndirmeden ÖNCE adresi denetler; uygun değilse hata fırlatır.
+
+    Döner: doğrulanan (ve `indir()`'in bağlantıyı pinleyeceği) ilk IP adresi.
+    """
     p = urlparse(url)
     if not p.hostname:
         raise FotografIndirilemedi("Adreste alan adı yok")
@@ -124,17 +141,39 @@ def dogrula(url: str) -> None:
     if not acik_izinli:
         raise FotografIndirilemedi(f"Alan adı beyaz listede değil: {p.hostname}")
 
-    _ip_denetle(p.hostname, acik_izinli)
+    return _ip_denetle(p.hostname, acik_izinli)[0]
 
 
 def indir(url: str) -> bytes:
     """Fotoğrafı indirir. Sorun olursa FotografIndirilemedi fırlatır."""
-    dogrula(url)
+    p = urlparse(url)
+    dogrulanan_ip = dogrula(url)
+
+    # DNS rebinding (TOCTOU) koruması: dogrula() hostname'i çözüp IP'yi
+    # denetledikten SONRA, httpx AYNI hostname'i KENDİSİ TEKRAR çözüp
+    # bağlanıyordu -- bu iki adım arasındaki (kısa da olsa) pencerede DNS
+    # kaydı değiştirilirse (TTL=0 ile saldırgan kontrolündeki bir alan adı),
+    # denetlenmemiş bir IP'ye bağlanılabilirdi. Artık bağlantı doğrudan
+    # dogrula()'nın döndürdüğü, ZATEN denetlenmiş IP'ye kuruluyor -- ikinci
+    # bir çözümleme hiç yapılmıyor. Host header ve TLS SNI orijinal alan
+    # adında bırakılıyor ki sanal barındırma ve sertifika doğrulaması
+    # (httpcore'un `sni_hostname` extension'ı üzerinden) bozulmasın.
+    pinli_host = f"[{dogrulanan_ip}]" if ":" in dogrulanan_ip else dogrulanan_ip
+    pinli_netloc = pinli_host if p.port is None else f"{pinli_host}:{p.port}"
+    pinli_url = urlunparse(p._replace(netloc=pinli_netloc))
+    headers = {"Host": p.netloc}
+    extensions = {"sni_hostname": p.hostname} if p.scheme == "https" else {}
+
     try:
         # follow_redirects=False: yönlendirilen adresi yeniden doğrulayamayız,
         # bu yüzden hiç takip etmiyoruz. Presigned S3 adresleri yönlendirmez.
-        with httpx.stream("GET", url, timeout=ZAMAN_ASIMI,
-                          follow_redirects=False) as cevap:
+        #
+        # üst düzey httpx.stream() `extensions` parametresini KABUL ETMİYOR
+        # (yalnızca httpx.Client.stream() eder) -- SNI pinleme için Client
+        # kullanılması ZORUNLU, kısayol fonksiyonu yeterli değil.
+        with httpx.Client(timeout=ZAMAN_ASIMI) as client, \
+             client.stream("GET", pinli_url, follow_redirects=False,
+                           headers=headers, extensions=extensions) as cevap:
             if cevap.is_redirect:
                 raise FotografIndirilemedi(
                     f"Yönlendirme takip edilmiyor (HTTP {cevap.status_code})")

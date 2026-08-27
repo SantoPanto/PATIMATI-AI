@@ -102,6 +102,16 @@ PATTERN_PROMPTS = {
     "spotted": "a photo of an animal with spotted fur",
     "solid":   "a photo of an animal with solid single-colored fur",
     "bicolor": "a photo of an animal with two-colored patched fur",
+    # HARD_PROMPTS'un her kategorisinde bir "unknown" seçeneği var (fur_length,
+    # ear_shape, tail, size, eye_color) ama bu listede yoktu -- softmax 4
+    # seçenek arasından ZORUNLU bir kazanan seçtiği için hayvan olmayan ya da
+    # deseni belirsiz bir fotoğrafa bile bunlardan biri atanıyordu. Diğer
+    # kategorilerle aynı desende bir "unknown" seçeneği eklendi. Düşük risk:
+    # `pattern` yalnızca "soft:" katmanında bonus puan üretiyor (bkz.
+    # matcher.py), hiçbir eşleşmeyi ELEMİYOR -- "unknown" dönmesi en kötü
+    # ihtimalle o bonus etiketinin eklenmemesi demek (analyze()'deki
+    # `if pattern != "unknown"` kontrolü zaten bunu bekliyordu).
+    "unknown": "a blurry photo where the fur pattern is not visible",
 }
 
 # 1. HARD (Kalıcı) Özellikler (Ceza/Eleyici)

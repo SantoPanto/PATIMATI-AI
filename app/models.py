@@ -11,7 +11,7 @@ class AnalyzeResponse(BaseModel):
     is_pet: bool = True             # False → fotoğrafta kedi/köpek görünmüyor
     breed: str | None = None        # Güven eşiğinin altındaysa None
     breed_confidence: float = 0.0
-    pattern: str | None = None      # tabby | spotted | solid | bicolor
+    pattern: str | None = None      # tabby | spotted | solid | bicolor | unknown
     colors: list[dict]              # Dominant renkler
     model_version: str              # Hangi model/ön işlemeyle üretildi
     # BİLGİ AMAÇLI -- ⚠ ÖLÇÜLMEDİ (bkz. app/attributes.py:TASARIM_PROMPTS).
