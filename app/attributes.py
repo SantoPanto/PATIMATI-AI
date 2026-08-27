@@ -321,6 +321,10 @@ class AttributeAnalyzer:
             "is_pet": is_pet,
             # Hayvan değilse cins gösterme — "araba fotoğrafı: Pug" olmasın
             "breed": breed if (is_pet and breed_conf >= self.BREED_MIN_PROB) else None,
+            # Eşik altında da EN İYİ tahminin ADI -- ilan formunun "düşük
+            # güvenli öneri" dolumu için (2026-08-27 S5). breed'in aksine
+            # eşikle SIFIRLANMAZ; hayvan değilse yine None.
+            "breed_top": breed if is_pet else None,
             "breed_confidence": round(breed_conf, 4),
             "pattern": pattern,
             "colors": [{"r": c["r"], "g": c["g"], "b": c["b"], "score": c["score"]}
